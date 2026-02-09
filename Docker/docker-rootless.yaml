@@ -1,0 +1,117 @@
+#cloud-config
+
+# Docker Rootless Installation
+# Runs Docker daemon without root privileges for enhanced security
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - apt-transport-https
+  - software-properties-common
+  - uidmap
+  - dbus-user-session
+  - fuse-overlayfs
+  - slirp4netns
+
+write_files:
+  - path: /home/ubuntu/test-docker.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      echo "=== Testing Docker Rootless Installation ==="
+      echo ""
+      echo "Docker version:"
+      docker --version
+      echo ""
+      echo "Docker Compose version:"
+      docker compose version
+      echo ""
+      echo "Docker context:"
+      docker context ls
+      echo ""
+      echo "Docker info (rootless check):"
+      docker info 2>/dev/null | grep -E "Root|Security|Context"
+      echo ""
+      echo "Running hello-world container..."
+      docker run --rm hello-world
+      echo ""
+      echo "=== Docker Rootless Test Complete ==="
+
+  - path: /home/ubuntu/docker-compose-example/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      services:
+        web:
+          image: nginx:latest
+          ports:
+            - "8080:80"
+          volumes:
+            - ./html:/usr/share/nginx/html:ro
+          restart: unless-stopped
+
+  - path: /home/ubuntu/docker-compose-example/html/index.html
+    permissions: '0644'
+    content: |
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>Docker Rootless VM</title>
+      </head>
+      <body>
+          <h1>Docker Rootless VM is Running!</h1>
+          <p>Your Docker environment is running without root privileges.</p>
+      </body>
+      </html>
+
+  - path: /home/ubuntu/.config/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+  - systemctl disable --now docker.service docker.socket
+  - systemctl disable --now containerd.service
+  - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 ubuntu
+  - loginctl enable-linger ubuntu
+  - chown -R ubuntu:ubuntu /home/ubuntu
+  - mkdir -p /home/ubuntu/.config/docker
+  - mkdir -p /home/ubuntu/.config/systemd/user
+  - mkdir -p /home/ubuntu/.local/share/docker
+  - mkdir -p /home/ubuntu/bin
+  - chown -R ubuntu:ubuntu /home/ubuntu/.config
+  - chown -R ubuntu:ubuntu /home/ubuntu/.local
+  - chown -R ubuntu:ubuntu /home/ubuntu/bin
+  - echo "net.ipv4.ip_unprivileged_port_start=0" >> /etc/sysctl.conf
+  - sysctl -p
+  # Remove any leftover system Docker socket
+  - rm -f /var/run/docker.sock /run/docker.sock
+  - sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 /usr/bin/dockerd-rootless-setuptool.sh install
+  - sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 systemctl --user enable docker
+  - sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 systemctl --user start docker
+  - echo 'export PATH=/home/ubuntu/bin:$PATH' >> /home/ubuntu/.bashrc
+  - echo 'export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/docker.sock' >> /home/ubuntu/.bashrc
+  - chown ubuntu:ubuntu /home/ubuntu/.bashrc
+  - sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 DOCKER_HOST=unix:///run/user/1000/docker.sock docker pull hello-world || true
+
+final_message: |
+  Docker Rootless installation complete!
+  SSH: multipass shell docker-rootless-vm
+  Test: ./test-docker.sh

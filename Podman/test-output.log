@@ -1,0 +1,98 @@
+
+[0;34m╔════════════════════════════════════════════════════════════════╗[0m
+[0;34m║       DOCKER-IN-PODMAN VM TEST SUITE                           ║[0m
+[0;34m║       VM: docker-in-podman-vm[0m
+[0;34m╚════════════════════════════════════════════════════════════════╝[0m
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Checking Prerequisites[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m Multipass installation
+[0;32m✔ PASS:[0m Multipass is installed (multipass   1.16.1+mac)
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Checking VM Status[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m VM 'docker-in-podman-vm' exists
+[0;32m✔ PASS:[0m VM exists
+[1;33m▶ Testing:[0m VM is running
+[0;32m✔ PASS:[0m VM is running
+[1;33m▶ Testing:[0m Cloud-init completed
+[0;32m✔ PASS:[0m Cloud-init completed
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Testing Podman Installation (Host)[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m Podman is installed
+[0;32m✔ PASS:[0m podman version 4.9.3
+[1;33m▶ Testing:[0m Podman (root) can run containers
+[0;32m✔ PASS:[0m Podman can run containers
+[1;33m▶ Testing:[0m uidmap installed
+[0;32m✔ PASS:[0m uidmap is installed
+[1;33m▶ Testing:[0m slirp4netns installed
+[0;32m✔ PASS:[0m slirp4netns is installed
+[1;33m▶ Testing:[0m fuse-overlayfs installed
+[0;32m✔ PASS:[0m fuse-overlayfs is installed
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Testing Podman Configuration[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m Subuid configured for ubuntu
+[0;32m✔ PASS:[0m subuid configured
+[0;34mℹ INFO:[0m ubuntu:100000:65536
+[1;33m▶ Testing:[0m Subgid configured for ubuntu
+[0;32m✔ PASS:[0m subgid configured
+[0;34mℹ INFO:[0m ubuntu:100000:65536
+[1;33m▶ Testing:[0m User linger enabled
+[0;32m✔ PASS:[0m Linger enabled
+[1;33m▶ Testing:[0m Registry configuration exists
+exists
+[0;32m✔ PASS:[0m Registry configuration exists
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Testing Docker-in-Podman Container[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m Docker container exists
+[0;32m✔ PASS:[0m Docker container exists
+[1;33m▶ Testing:[0m Docker container is running
+[0;32m✔ PASS:[0m Docker container is running
+[1;33m▶ Testing:[0m Docker container is privileged
+[0;32m✔ PASS:[0m Container is privileged
+[1;33m▶ Testing:[0m Docker data volume exists
+[0;32m✔ PASS:[0m Docker data volume exists
+[1;33m▶ Testing:[0m Workspace volume mounted
+[0;32m✔ PASS:[0m Workspace volume mounted
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Testing Docker Daemon (Inside Container)[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m Docker daemon responding
+[0;32m✔ PASS:[0m Docker daemon is responding
+[1;33m▶ Testing:[0m Docker version
+[0;32m✔ PASS:[0m Docker version 27.3.1, build ce12230
+[1;33m▶ Testing:[0m Docker storage driver
+[0;32m✔ PASS:[0m Storage driver: overlay2
+[1;33m▶ Testing:[0m Docker root directory
+[0;32m✔ PASS:[0m Docker root: /var/lib/docker
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Testing Docker Wrapper Scripts[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m Docker wrapper exists
+exists
+[0;32m✔ PASS:[0m Docker wrapper is executable
+[1;33m▶ Testing:[0m Docker-compose wrapper exists
+exists
+[0;32m✔ PASS:[0m Docker-compose wrapper is executable
+[1;33m▶ Testing:[0m Start script exists
+exists
+[0;32m✔ PASS:[0m Start script is executable
+[1;33m▶ Testing:[0m PATH includes home directory
+[0;32m✔ PASS:[0m PATH includes home directory
+
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;35m  Testing Docker Functionality (Inside Container)[0m
+[0;35m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[1;33m▶ Testing:[0m Docker ps command
+[0;32m✔ PASS:[0m docker ps works
+[1;33m▶ Testing:[0m Pull image

@@ -1,0 +1,118 @@
+#cloud-config
+
+# Update package lists on first boot
+package_update: true
+package_upgrade: true
+
+# Install required packages (removed flatpak/GUI - not needed in headless VM)
+packages:
+  - podman
+  - podman-docker
+  - curl
+  - wget
+  - git
+  - uidmap
+  - slirp4netns
+  - fuse-overlayfs
+
+runcmd:
+  # Configure subuid and subgid for rootless containers FIRST
+  - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 ubuntu
+  
+  # Enable linger for ubuntu user (allows user services without active login)
+  - loginctl enable-linger ubuntu
+  
+  # Ensure home directory has correct ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+  
+  # Create required directories (including .local and .cache for Podman storage)
+  - mkdir -p /home/ubuntu/.config/containers
+  - mkdir -p /home/ubuntu/.config/systemd/user/default.target.wants
+  - mkdir -p /home/ubuntu/.local/share/containers/storage
+  - mkdir -p /home/ubuntu/.cache
+  
+  # Configure Podman for rootless operation
+  - |
+    cat > /home/ubuntu/.config/containers/containers.conf <<EOF
+    [containers]
+    log_driver = "k8s-file"
+    
+    [engine]
+    cgroup_manager = "systemd"
+    events_logger = "journald"
+    EOF
+  
+  # Set proper ownership for all user directories
+  - chown -R ubuntu:ubuntu /home/ubuntu/.config
+  - chown -R ubuntu:ubuntu /home/ubuntu/.local
+  - chown -R ubuntu:ubuntu /home/ubuntu/.cache
+  
+  # Enable podman socket for ubuntu user (run as ubuntu with proper environment)
+  - |
+    sudo -u ubuntu bash -c '
+    export XDG_RUNTIME_DIR=/run/user/$(id -u ubuntu)
+    systemctl --user daemon-reload
+    systemctl --user enable podman.socket
+    systemctl --user start podman.socket
+    '
+  
+  # Also enable system-wide podman socket (accessible via /run/podman/podman.sock)
+  - systemctl enable --now podman.socket
+
+# Write additional configuration files
+# Note: Owner set in runcmd after user creation to avoid timing issues
+write_files:
+  - path: /etc/containers/registries.conf
+    content: |
+      unqualified-search-registries = ["docker.io"]
+      
+      [[registry]]
+      location = "docker.io"
+      
+      [[registry]]
+      location = "quay.io"
+      
+      [[registry]]
+      location = "gcr.io"
+    permissions: '0644'
+
+  - path: /home/ubuntu/test-podman.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      echo "Testing Podman installation..."
+      podman --version
+      echo ""
+      echo "Checking podman socket..."
+      systemctl --user status podman.socket
+      echo ""
+      echo "Running hello-world container..."
+      podman run --rm hello-world
+      echo ""
+      echo "Podman info:"
+      podman info
+
+# Final setup commands
+final_message: |
+  Podman installation complete!
+  
+  === To use Podman in the VM ===
+  1. SSH into the VM: multipass shell <vm-name>
+  2. Run: podman --version
+  3. Test: ./test-podman.sh
+  
+  === To connect Podman Desktop from macOS ===
+  
+  Option 1: SSH Socket Forwarding (Recommended)
+  1. Install Podman Desktop on your Mac (brew install podman-desktop)
+  2. Get VM IP: multipass info <vm-name>
+  3. Forward the socket:
+     ssh -nNT -L /tmp/podman.sock:/run/user/1000/podman/podman.sock ubuntu@<VM-IP>
+  4. In Podman Desktop, add custom connection: unix:///tmp/podman.sock
+  
+  Option 2: Use system socket (runs as root)
+  - Socket path: /run/podman/podman.sock
+  - Forward: ssh -nNT -L /tmp/podman.sock:/run/podman/podman.sock ubuntu@<VM-IP>
+  
+  Rootless socket: /run/user/1000/podman/podman.sock
+  System socket: /run/podman/podman.sock

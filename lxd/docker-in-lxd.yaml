@@ -1,0 +1,194 @@
+#cloud-config
+
+# Docker-in-LXD Installation and Configuration
+# Run Docker containers inside LXD system containers
+# Requires special security settings for nested containerization
+# Pinned versions for stability (Ubuntu 24.04 LTS / Ubuntu 22.04 LTS container)
+
+package_update: true
+package_upgrade: true
+
+snap:
+  commands:
+    - snap install lxd --channel=6.1/stable
+
+packages:
+  - snapd
+  - bridge-utils
+  - curl
+  - wget
+  - jq
+
+write_files:
+  - path: /home/ubuntu/lxd-preseed.yaml
+    permissions: '0644'
+    content: |
+      config:
+        core.https_address: "[::]:8443"
+      networks:
+        - name: lxdbr0
+          type: bridge
+          config:
+            ipv4.address: 10.20.20.1/24
+            ipv4.nat: "true"
+            ipv6.address: none
+      storage_pools:
+        - name: default
+          driver: dir
+      profiles:
+        - name: default
+          config: {}
+          devices:
+            eth0:
+              name: eth0
+              network: lxdbr0
+              type: nic
+            root:
+              path: /
+              pool: default
+              type: disk
+
+  - path: /home/ubuntu/docker-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        security.nesting: "true"
+        security.syscalls.intercept.mknod: "true"
+        security.syscalls.intercept.setxattr: "true"
+      description: Profile for running Docker inside LXD containers
+      devices:
+        eth0:
+          name: eth0
+          network: lxdbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+
+  - path: /home/ubuntu/setup-docker-container.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Script to set up Docker inside an LXD container
+      
+      CONTAINER_NAME="${1:-docker-host}"
+      
+      echo "=== Setting up Docker in LXD container: $CONTAINER_NAME ==="
+      
+      # Check if container exists
+      if ! lxc info "$CONTAINER_NAME" &>/dev/null; then
+          echo "Error: Container '$CONTAINER_NAME' does not exist"
+          exit 1
+      fi
+      
+      echo "Installing Docker..."
+      lxc exec "$CONTAINER_NAME" -- apt-get update
+      lxc exec "$CONTAINER_NAME" -- apt-get install -y \
+          ca-certificates \
+          curl \
+          gnupg \
+          lsb-release
+      
+      echo "Adding Docker GPG key..."
+      lxc exec "$CONTAINER_NAME" -- bash -c 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
+      
+      echo "Adding Docker repository..."
+      lxc exec "$CONTAINER_NAME" -- bash -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list'
+      
+      echo "Installing Docker Engine..."
+      lxc exec "$CONTAINER_NAME" -- apt-get update
+      lxc exec "$CONTAINER_NAME" -- apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      
+      echo "Starting Docker..."
+      lxc exec "$CONTAINER_NAME" -- systemctl enable docker
+      lxc exec "$CONTAINER_NAME" -- systemctl start docker
+      
+      echo "Verifying Docker installation..."
+      lxc exec "$CONTAINER_NAME" -- docker --version
+      lxc exec "$CONTAINER_NAME" -- docker run --rm hello-world
+      
+      echo ""
+      echo "=== Docker setup complete in $CONTAINER_NAME ==="
+
+runcmd:
+  # Ensure snapd is ready
+  - systemctl enable --now snapd.socket
+  - sleep 5
+  - snap wait system seed.loaded
+
+  # Install LXD from snap (6.1 stable for reproducibility)
+  - snap install lxd --channel=6.1/stable
+
+  # Wait for LXD snap to be ready
+  - sleep 10
+
+  # Add ubuntu user to lxd group
+  - usermod -aG lxd ubuntu
+
+  # Ensure home directory ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+  # Initialize LXD with preseed configuration
+  - cat /home/ubuntu/lxd-preseed.yaml | lxd init --preseed
+
+  # Wait for LXD to be fully initialized
+  - sleep 5
+
+  # Create the Docker profile from file
+  - lxc profile create docker || true
+  - cat /home/ubuntu/docker-profile.yaml | lxc profile edit docker
+
+  # Pre-download Ubuntu 22.04 image
+  - "lxc image copy ubuntu:22.04 local: --alias ubuntu-22.04 || true"
+
+  # Create Docker host container with the docker profile
+  - lxc launch ubuntu:22.04 docker-host --profile default --profile docker
+  - sleep 15
+
+  # Install Docker inside the container
+  - lxc exec docker-host -- apt-get update
+  - lxc exec docker-host -- apt-get install -y ca-certificates curl gnupg lsb-release
+  - lxc exec docker-host -- bash -c 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
+  - lxc exec docker-host -- bash -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list'
+  - lxc exec docker-host -- apt-get update
+  - lxc exec docker-host -- apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+  # Add ubuntu user to docker group
+  - lxc exec docker-host -- usermod -aG docker ubuntu
+
+  # Start Docker service
+  - lxc exec docker-host -- systemctl enable docker
+  - lxc exec docker-host -- systemctl start docker
+
+  # Run nginx container and expose it
+  - lxc exec docker-host -- docker pull nginx:alpine
+  - lxc exec docker-host -- docker run -d --name web --restart unless-stopped -p 80:80 nginx:alpine
+
+  # Add proxy device to expose container's port 80 on VM port 8080
+  - lxc config device add docker-host http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80
+
+  # Ensure ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+final_message: |
+  Docker-in-LXD installation complete!
+  
+  === What's Running ===
+  - LXD container: docker-host (with Docker profile)
+  - Docker container: nginx (inside docker-host)
+  - Web access: http://<vm-ip>:8080
+  
+  === Quick Test ===
+  curl http://localhost:8080
+  
+  === Access Docker ===
+  lxc exec docker-host -- docker ps
+  lxc exec docker-host -- docker images
+  
+  === Run More Containers ===
+  lxc exec docker-host -- docker run -d --name myapp -p 8080:80 nginx
+  
+  === Create Another Docker Host ===
+  lxc launch ubuntu:22.04 my-docker --profile default --profile docker
+  ./setup-docker-container.sh my-docker

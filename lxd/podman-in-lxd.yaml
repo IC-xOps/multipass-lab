@@ -1,0 +1,192 @@
+#cloud-config
+
+# Podman-in-LXD Installation and Configuration
+# Run Podman containers inside LXD system containers
+# Podman is daemonless and rootless by default
+# Pinned versions for stability (Ubuntu 24.04 LTS / Ubuntu 22.04 LTS container)
+
+package_update: true
+package_upgrade: true
+
+snap:
+  commands:
+    - snap install lxd --channel=6.1/stable
+
+packages:
+  - snapd
+  - bridge-utils
+  - curl
+  - wget
+  - jq
+  - python3-pip
+
+write_files:
+  - path: /home/ubuntu/lxd-preseed.yaml
+    permissions: '0644'
+    content: |
+      config:
+        core.https_address: "[::]:8443"
+      networks:
+        - name: lxdbr0
+          type: bridge
+          config:
+            ipv4.address: 10.30.30.1/24
+            ipv4.nat: "true"
+            ipv6.address: none
+      storage_pools:
+        - name: default
+          driver: dir
+      profiles:
+        - name: default
+          config: {}
+          devices:
+            eth0:
+              name: eth0
+              network: lxdbr0
+              type: nic
+            root:
+              path: /
+              pool: default
+              type: disk
+
+  - path: /home/ubuntu/podman-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        security.nesting: "true"
+        security.syscalls.intercept.mknod: "true"
+        security.syscalls.intercept.setxattr: "true"
+      description: Profile for running Podman inside LXD containers
+      devices:
+        eth0:
+          name: eth0
+          network: lxdbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+
+  - path: /home/ubuntu/setup-podman-container.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Script to set up Podman inside an LXD container
+      
+      CONTAINER_NAME="${1:-podman-host}"
+      
+      echo "=== Setting up Podman in LXD container: $CONTAINER_NAME ==="
+      
+      # Check if container exists
+      if ! lxc info "$CONTAINER_NAME" &>/dev/null; then
+          echo "Error: Container '$CONTAINER_NAME' does not exist"
+          exit 1
+      fi
+      
+      echo "Installing Podman..."
+      lxc exec "$CONTAINER_NAME" -- apt-get update
+      lxc exec "$CONTAINER_NAME" -- apt-get install -y podman slirp4netns fuse-overlayfs uidmap python3-pip
+      lxc exec "$CONTAINER_NAME" -- pip3 install podman-compose
+      
+      echo "Configuring rootless Podman for ubuntu user..."
+      lxc exec "$CONTAINER_NAME" -- bash -c 'echo "ubuntu:100000:65536" >> /etc/subuid'
+      lxc exec "$CONTAINER_NAME" -- bash -c 'echo "ubuntu:100000:65536" >> /etc/subgid'
+      
+      echo "Verifying Podman installation..."
+      lxc exec "$CONTAINER_NAME" -- podman --version
+      lxc exec "$CONTAINER_NAME" -- podman info --format '{{.Host.OCIRuntime.Name}}'
+      
+      echo ""
+      echo "=== Podman setup complete in $CONTAINER_NAME ==="
+      echo ""
+      echo "Run containers as root:"
+      echo "  lxc exec $CONTAINER_NAME -- podman run --rm docker.io/alpine echo hello"
+      echo ""
+      echo "Run containers as ubuntu (rootless):"
+      echo "  lxc exec $CONTAINER_NAME -- sudo -u ubuntu podman run --rm docker.io/alpine echo hello"
+
+runcmd:
+  # Ensure snapd is ready
+  - systemctl enable --now snapd.socket
+  - sleep 5
+  - snap wait system seed.loaded
+
+  # Install LXD from snap (6.1 stable for reproducibility)
+  - snap install lxd --channel=6.1/stable
+
+  # Wait for LXD snap to be ready
+  - sleep 10
+
+  # Add ubuntu user to lxd group
+  - usermod -aG lxd ubuntu
+
+  # Ensure home directory ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+  # Initialize LXD with preseed configuration
+  - cat /home/ubuntu/lxd-preseed.yaml | lxd init --preseed
+
+  # Wait for LXD to be fully initialized
+  - sleep 5
+
+  # Create the Podman profile from file
+  - lxc profile create podman || true
+  - cat /home/ubuntu/podman-profile.yaml | lxc profile edit podman
+
+  # Pre-download Ubuntu 22.04 image
+  - "lxc image copy ubuntu:22.04 local: --alias ubuntu-22.04 || true"
+
+  # Create Podman host container with the podman profile
+  - lxc launch ubuntu:22.04 podman-host --profile default --profile podman
+  - sleep 15
+
+  # Install Podman and tools inside the container
+  - lxc exec podman-host -- apt-get update
+  - lxc exec podman-host -- apt-get install -y podman slirp4netns fuse-overlayfs uidmap python3-pip
+
+  # Install podman-compose via pip
+  - lxc exec podman-host -- pip3 install podman-compose
+
+  # Configure subuid/subgid for rootless podman
+  - lxc exec podman-host -- bash -c 'grep -q "^ubuntu:" /etc/subuid || echo "ubuntu:100000:65536" >> /etc/subuid'
+  - lxc exec podman-host -- bash -c 'grep -q "^ubuntu:" /etc/subgid || echo "ubuntu:100000:65536" >> /etc/subgid'
+
+  # Enable lingering for rootless podman systemd support
+  - lxc exec podman-host -- loginctl enable-linger ubuntu
+  - lxc exec podman-host -- mkdir -p /home/ubuntu/.local/share/containers
+  - lxc exec podman-host -- chown -R ubuntu:ubuntu /home/ubuntu/.local
+
+  # Pull nginx image and run container
+  - lxc exec podman-host -- podman pull docker.io/nginx:alpine
+  - lxc exec podman-host -- podman run -d --name web --restart always -p 80:80 docker.io/nginx:alpine
+
+  # Add proxy device to expose container's port 80 on VM port 8080
+  - lxc config device add podman-host http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80
+
+  # Ensure ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+final_message: |
+  Podman-in-LXD installation complete!
+  
+  === What's Running ===
+  - LXD container: podman-host (with Podman profile)
+  - Podman container: nginx (inside podman-host)
+  - Web access: http://<vm-ip>:8080
+  
+  === Quick Test ===
+  curl http://localhost:8080
+  
+  === Access Podman ===
+  lxc exec podman-host -- podman ps
+  lxc exec podman-host -- podman images
+  
+  === Run More Containers ===
+  lxc exec podman-host -- podman run -d --name myapp -p 8081:80 docker.io/nginx
+  
+  === Rootless Podman (as ubuntu user) ===
+  lxc exec podman-host -- sudo -u ubuntu podman run --rm docker.io/alpine echo hello
+  
+  === Create Another Podman Host ===
+  lxc launch ubuntu:22.04 my-podman --profile default --profile podman
+  ./setup-podman-container.sh my-podman

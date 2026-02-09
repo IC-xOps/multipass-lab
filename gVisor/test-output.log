@@ -1,0 +1,42 @@
+[3J[H[2J
+[1m╔════════════════════════════════════════════════════════════════╗[0m
+[1m║       GVISOR VM TEST SUITE                                     ║[0m
+[1m║       VM: docker-in-gvisor-vm[0m
+[1m╚════════════════════════════════════════════════════════════════╝[0m
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;36m  Checking Prerequisites[0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m▶ Testing:[0m Multipass installation
+[0;32m✔ PASS:[0m Multipass is installed (multipass   1.16.1+mac)
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;36m  Checking VM Status[0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m▶ Testing:[0m VM 'docker-in-gvisor-vm' exists
+[0;32m✔ PASS:[0m VM exists
+[0;34m▶ Testing:[0m VM is running
+[0;32m✔ PASS:[0m VM is running
+[0;34m▶ Testing:[0m Cloud-init completed
+[1;33m⚠ WARN:[0m Cloud-init completed with errors (core services may still be running)
+[0;36mℹ INFO:[0m Check with: multipass exec docker-in-gvisor-vm -- cloud-init status --long
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;36m  Testing gVisor Installation[0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m▶ Testing:[0m runsc binary exists
+exists
+[0;32m✔ PASS:[0m runsc binary found
+[0;34m▶ Testing:[0m runsc is executable
+executable
+[0;32m✔ PASS:[0m runsc is executable
+[0;34m▶ Testing:[0m runsc version
+[0;32m✔ PASS:[0m runsc version: runsc version release-20240115.0
+[0;34m▶ Testing:[0m containerd-shim-runsc-v1 exists
+exists
+[0;32m✔ PASS:[0m containerd-shim-runsc-v1 found
+
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;36m  Testing containerd Configuration[0m
+[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;34m▶ Testing:[0m containerd service status

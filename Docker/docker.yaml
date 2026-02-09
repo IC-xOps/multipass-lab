@@ -1,0 +1,227 @@
+#cloud-config
+
+# Update package lists on first boot
+package_update: true
+package_upgrade: true
+
+# Install prerequisites
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - apt-transport-https
+  - software-properties-common
+
+runcmd:
+  # Add Docker's official GPG key
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+
+  # Add Docker repository
+  - |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+  # Update apt and install Docker
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  # Add ubuntu user to docker group (allows running docker without sudo)
+  - usermod -aG docker ubuntu
+
+  # POST-INSTALLATION: Ensure home directory has correct ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+  # Create required directories with proper permissions
+  - mkdir -p /home/ubuntu/.docker
+  - mkdir -p /home/ubuntu/.local/share
+  - mkdir -p /home/ubuntu/.cache
+  - chown -R ubuntu:ubuntu /home/ubuntu/.docker
+  - chown -R ubuntu:ubuntu /home/ubuntu/.local
+  - chown -R ubuntu:ubuntu /home/ubuntu/.cache
+
+  # POST-INSTALLATION: Configure Docker CLI credentials store (optional but recommended)
+  - |
+    cat > /home/ubuntu/.docker/config.json <<EOF
+    {
+      "detachKeys": "ctrl-@"
+    }
+    EOF
+  - chown ubuntu:ubuntu /home/ubuntu/.docker/config.json
+
+  # Enable and start Docker service
+  - systemctl enable docker
+  - systemctl start docker
+
+  # Enable Docker to start on boot
+  - systemctl enable containerd
+
+  # Configure Docker daemon with recommended settings
+  # NOTE: live-restore is incompatible with Swarm mode, so it's not included here
+  - |
+    cat > /etc/docker/daemon.json <<EOF
+    {
+      "log-driver": "json-file",
+      "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+      },
+      "storage-driver": "overlay2",
+      "default-ulimits": {
+        "nofile": {
+          "Name": "nofile",
+          "Hard": 65536,
+          "Soft": 65536
+        }
+      },
+      "userland-proxy": false
+    }
+    EOF
+
+  # Restart Docker to apply daemon configuration
+  - systemctl restart docker
+
+  # POST-INSTALLATION: Apply group membership immediately for current boot
+  # This ensures 'ubuntu' user can use docker without re-login
+  - |
+    # Create a script that runs docker commands as ubuntu user with new group
+    cat > /home/ubuntu/apply-docker-group.sh <<'SCRIPT'
+    #!/bin/bash
+    # This script helps apply docker group without logout
+    # Run: newgrp docker
+    echo "Docker group has been applied to your session"
+    SCRIPT
+  - chmod +x /home/ubuntu/apply-docker-group.sh
+  - chown ubuntu:ubuntu /home/ubuntu/apply-docker-group.sh
+
+  # POST-INSTALLATION: Set up bash completion for Docker
+  - curl -fsSL https://raw.githubusercontent.com/docker/cli/master/contrib/completion/bash/docker -o /etc/bash_completion.d/docker || true
+
+  # POST-INSTALLATION: Configure sysctl settings for Docker networking
+  - |
+    cat >> /etc/sysctl.conf <<EOF
+    # Docker networking optimizations
+    net.bridge.bridge-nf-call-iptables = 1
+    net.bridge.bridge-nf-call-ip6tables = 1
+    net.ipv4.ip_forward = 1
+    EOF
+  - sysctl -p || true
+
+  # Initialize Docker Swarm (single-node manager)
+  - docker swarm init --advertise-addr $(hostname -I | awk '{print $1}') || true
+
+  # Pull common images for convenience
+  - docker pull hello-world
+
+# Write additional configuration files
+# Note: Using root:root initially, ownership fixed in runcmd after user creation
+write_files:
+  - path: /home/ubuntu/test-docker.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      echo "=== Testing Docker Installation ==="
+      echo ""
+      echo "Docker version:"
+      docker --version
+      echo ""
+      echo "Docker Compose version:"
+      docker compose version
+      echo ""
+      echo "Docker info:"
+      docker info
+      echo ""
+      echo "Running hello-world container..."
+      docker run --rm hello-world
+      echo ""
+      echo "=== Docker Swarm Status ==="
+      docker node ls
+      echo ""
+      echo "Docker installation complete!"
+
+  - path: /home/ubuntu/docker-compose-example/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      services:
+        web:
+          image: nginx:latest
+          ports:
+            - "8080:80"
+          volumes:
+            - ./html:/usr/share/nginx/html:ro
+          restart: unless-stopped
+        
+        redis:
+          image: redis:alpine
+          restart: unless-stopped
+
+  - path: /home/ubuntu/docker-compose-example/html/index.html
+    permissions: '0644'
+    content: |
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>Docker VM - Welcome</title>
+          <style>
+              body { font-family: Arial, sans-serif; margin: 40px; background: #1a1a2e; color: #eee; }
+              h1 { color: #0db7ed; }
+              .container { max-width: 600px; margin: 0 auto; }
+              code { background: #16213e; padding: 2px 8px; border-radius: 4px; }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <h1>🐳 Docker VM is Running!</h1>
+              <p>Your Docker environment is ready with:</p>
+              <ul>
+                  <li>Docker Engine</li>
+                  <li>Docker Compose</li>
+                  <li>Docker Swarm (initialized)</li>
+              </ul>
+              <p>Test with: <code>docker ps</code></p>
+          </div>
+      </body>
+      </html>
+
+  - path: /home/ubuntu/swarm-example/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      services:
+        web:
+          image: nginx:latest
+          deploy:
+            replicas: 3
+            update_config:
+              parallelism: 1
+              delay: 10s
+            restart_policy:
+              condition: on-failure
+          ports:
+            - "80:80"
+
+# Final setup commands
+final_message: |
+  Docker installation complete!
+  
+  === Quick Start ===
+  1. SSH into the VM: multipass shell docker-vm
+  2. Test: ./test-docker.sh
+  
+  === Docker Compose Example ===
+  cd ~/docker-compose-example
+  docker compose up -d
+  
+  === Docker Swarm Example ===
+  cd ~/swarm-example
+  docker stack deploy -c docker-compose.yml mystack
+  
+  === Useful Commands ===
+  docker ps                    # List running containers
+  docker compose up -d         # Start compose services
+  docker compose down          # Stop compose services
+  docker node ls               # List swarm nodes
+  docker service ls            # List swarm services
+  docker stack deploy          # Deploy a stack

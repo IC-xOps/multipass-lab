@@ -1,0 +1,364 @@
+#cloud-config
+
+# Docker-in-gVisor VM with Caddy Webserver
+# Ubuntu 24.04 LTS with gVisor runtime and Caddy container
+
+hostname: docker-in-gvisor-vm
+
+users:
+  - default
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+
+package_update: true
+package_upgrade: true
+
+packages:
+  # Essential packages
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  # Container runtime dependencies
+  - containerd
+  - runc
+  # Network tools
+  - net-tools
+  - netcat-openbsd
+  - dnsutils
+  # Utilities
+  - jq
+  - wget
+
+write_files:
+  # gVisor installation script
+  - path: /tmp/install-gvisor.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      
+      echo "=== Installing gVisor (runsc) ==="
+      
+      # Detect architecture
+      ARCH=$(uname -m)
+      case ${ARCH} in
+        x86_64) ARCH="x86_64" ;;
+        aarch64) ARCH="aarch64" ;;
+        *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;;
+      esac
+      
+      # Download and install runsc (pinned version for stability)
+      GVISOR_VERSION="20240115.0"
+      cd /tmp
+      
+      wget -q "https://storage.googleapis.com/gvisor/releases/release/${GVISOR_VERSION}/${ARCH}/runsc" -O runsc
+      wget -q "https://storage.googleapis.com/gvisor/releases/release/${GVISOR_VERSION}/${ARCH}/runsc.sha512" -O runsc.sha512
+      wget -q "https://storage.googleapis.com/gvisor/releases/release/${GVISOR_VERSION}/${ARCH}/containerd-shim-runsc-v1" -O containerd-shim-runsc-v1
+      wget -q "https://storage.googleapis.com/gvisor/releases/release/${GVISOR_VERSION}/${ARCH}/containerd-shim-runsc-v1.sha512" -O containerd-shim-runsc-v1.sha512
+      
+      # Verify checksums
+      sha512sum -c runsc.sha512 || exit 1
+      sha512sum -c containerd-shim-runsc-v1.sha512 || exit 1
+      
+      # Install binaries
+      chmod +x runsc containerd-shim-runsc-v1
+      mv runsc /usr/local/bin/
+      mv containerd-shim-runsc-v1 /usr/local/bin/
+      
+      # Verify installation
+      /usr/local/bin/runsc --version
+      
+      echo "=== gVisor installed successfully ==="
+
+  # Containerd configuration for gVisor
+  - path: /etc/containerd/config.toml
+    permissions: '0644'
+    content: |
+      version = 2
+      
+      [plugins]
+        [plugins."io.containerd.grpc.v1.cri"]
+          [plugins."io.containerd.grpc.v1.cri".containerd]
+            default_runtime_name = "runc"
+            
+            [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                runtime_type = "io.containerd.runc.v2"
+                
+              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+                runtime_type = "io.containerd.runsc.v1"
+                
+              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.gvisor]
+                runtime_type = "io.containerd.runsc.v1"
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.gvisor.options]
+                  TypeUrl = "io.containerd.runsc.v1.options"
+                  ConfigPath = "/etc/containerd/runsc.toml"
+
+  # gVisor runtime configuration
+  - path: /etc/containerd/runsc.toml
+    permissions: '0644'
+    content: |
+      [runsc_config]
+      platform = "ptrace"
+      network = "host"
+      strace = false
+      log-packets = false
+      debug = false
+      debug-log = ""
+      file-access = "exclusive"
+      overlay = false
+      
+      # Disable cgroups for compatibility
+      ignore-cgroups = true
+
+  # nerdctl installation script (Docker-compatible CLI for containerd)
+  - path: /tmp/install-nerdctl.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      
+      echo "=== Installing nerdctl ==="
+      
+      # Detect architecture
+      ARCH=$(uname -m)
+      case ${ARCH} in
+        x86_64) ARCH="amd64" ;;
+        aarch64) ARCH="arm64" ;;
+        *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;;
+      esac
+      
+      # Download and install nerdctl (pinned version for stability)
+      NERDCTL_VERSION="1.7.6"
+      cd /tmp
+      
+      wget -q "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${ARCH}.tar.gz"
+      tar Cxzvf /usr/local/bin nerdctl-${NERDCTL_VERSION}-linux-${ARCH}.tar.gz
+      
+      # Verify installation
+      /usr/local/bin/nerdctl --version
+      
+      echo "=== nerdctl installed successfully ==="
+
+  # CNI plugins installation script
+  - path: /tmp/install-cni-plugins.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      
+      echo "=== Installing CNI plugins ==="
+      
+      # Detect architecture
+      ARCH=$(uname -m)
+      case ${ARCH} in
+        x86_64) ARCH="amd64" ;;
+        aarch64) ARCH="arm64" ;;
+        *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;;
+      esac
+      
+      # Download and install CNI plugins
+      CNI_VERSION="1.4.1"
+      mkdir -p /opt/cni/bin
+      cd /tmp
+      
+      wget -q "https://github.com/containernetworking/plugins/releases/download/v${CNI_VERSION}/cni-plugins-linux-${ARCH}-v${CNI_VERSION}.tgz"
+      tar Cxzvf /opt/cni/bin cni-plugins-linux-${ARCH}-v${CNI_VERSION}.tgz
+      
+      echo "=== CNI plugins installed successfully ==="
+
+  # Caddy container deployment script
+  - path: /home/ubuntu/deploy-caddy.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      
+      echo "=== Deploying Caddy webserver with gVisor ==="
+      
+      # Create Caddyfile
+      mkdir -p /home/ubuntu/caddy-data
+      cat > /home/ubuntu/caddy-data/Caddyfile << 'EOF'
+      :80 {
+          root * /usr/share/caddy
+          file_server
+          respond /health 200
+          respond /api/info "gVisor + Caddy running on {host}" 200
+      }
+      EOF
+      
+      # Create index.html
+      cat > /home/ubuntu/caddy-data/index.html << 'EOF'
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>gVisor + Caddy</title>
+          <style>
+              body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+              h1 { color: #4285f4; }
+              .status { background: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0; }
+              code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
+          </style>
+      </head>
+      <body>
+          <h1>🛡️ gVisor + Caddy Webserver</h1>
+          <div class="status">
+              <p>✅ <strong>Status:</strong> Running</p>
+              <p>🔒 <strong>Runtime:</strong> gVisor (runsc)</p>
+              <p>🌐 <strong>Webserver:</strong> Caddy</p>
+          </div>
+          <h2>Container Security</h2>
+          <p>This Caddy webserver is running inside a gVisor sandbox, providing an additional layer of security through user-space kernel isolation.</p>
+          <h2>Test Endpoints</h2>
+          <ul>
+              <li><code>GET /</code> - This page</li>
+              <li><code>GET /health</code> - Health check (returns 200)</li>
+              <li><code>GET /api/info</code> - Server info</li>
+          </ul>
+      </body>
+      </html>
+      EOF
+      
+      # Stop and remove existing container if any
+      nerdctl stop caddy-gvisor 2>/dev/null || true
+      nerdctl rm caddy-gvisor 2>/dev/null || true
+      
+      # Run Caddy with gVisor runtime
+      nerdctl run -d \
+        --name caddy-gvisor \
+        --runtime io.containerd.runsc.v1 \
+        -p 80:80 \
+        -p 443:443 \
+        -v /home/ubuntu/caddy-data/Caddyfile:/etc/caddy/Caddyfile:ro \
+        -v /home/ubuntu/caddy-data/index.html:/usr/share/caddy/index.html:ro \
+        -v caddy-data:/data \
+        -v caddy-config:/config \
+        --restart unless-stopped \
+        caddy:2.7.6-alpine
+      
+      echo "=== Caddy deployed successfully ==="
+      echo ""
+      echo "Access the webserver:"
+      echo "  - http://localhost"
+      echo "  - http://$(hostname -I | awk '{print $1}')"
+      echo ""
+      echo "Check container status:"
+      echo "  nerdctl ps"
+      echo ""
+      echo "View logs:"
+      echo "  nerdctl logs caddy-gvisor"
+
+  # Test script for quick validation
+  - path: /home/ubuntu/test-gvisor.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      
+      echo "=== gVisor + Caddy Test ==="
+      echo ""
+      
+      echo "1. Checking gVisor installation..."
+      /usr/local/bin/runsc --version
+      echo ""
+      
+      echo "2. Checking containerd status..."
+      systemctl status containerd --no-pager | head -3
+      echo ""
+      
+      echo "3. Checking nerdctl..."
+      nerdctl --version
+      echo ""
+      
+      echo "4. Listing containers..."
+      nerdctl ps
+      echo ""
+      
+      echo "5. Testing Caddy webserver..."
+      curl -s http://localhost/health && echo " ✓ Health check passed"
+      echo ""
+      
+      echo "6. Testing API endpoint..."
+      curl -s http://localhost/api/info
+      echo ""
+      
+      echo "=== Test complete ==="
+
+  # Systemd service for Caddy auto-start
+  - path: /etc/systemd/system/caddy-gvisor.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Caddy Webserver with gVisor Runtime
+      After=containerd.service
+      Requires=containerd.service
+      
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      User=ubuntu
+      WorkingDirectory=/home/ubuntu
+      ExecStartPre=/usr/bin/sleep 10
+      ExecStart=/home/ubuntu/deploy-caddy.sh
+      ExecStop=/usr/local/bin/nerdctl stop caddy-gvisor
+      
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  # Wait for cloud-init network
+  - sleep 5
+  
+  # Install gVisor
+  - /tmp/install-gvisor.sh
+  
+  # Install nerdctl
+  - /tmp/install-nerdctl.sh
+  
+  # Install CNI plugins
+  - /tmp/install-cni-plugins.sh
+  
+  # Restart containerd with new configuration
+  - systemctl restart containerd
+  - sleep 5
+  
+  # Pull Caddy image
+  - sudo -u ubuntu /usr/local/bin/nerdctl pull caddy:2.7.6-alpine
+  
+  # Deploy Caddy container
+  - sudo -u ubuntu /home/ubuntu/deploy-caddy.sh
+  
+  # Enable auto-start service
+  - systemctl daemon-reload
+  - systemctl enable caddy-gvisor.service
+  
+  # Set ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu/caddy-data
+
+final_message: |
+  Docker-in-gVisor VM with Caddy webserver is ready!
+  
+  === Quick Start ===
+  SSH: multipass shell docker-in-gvisor-vm
+  
+  Access Caddy webserver:
+    http://localhost (from inside VM)
+    http://<VM-IP> (from host)
+  
+  Test the setup:
+    ~/test-gvisor.sh
+  
+  === Container Management ===
+  List containers: nerdctl ps
+  View logs: nerdctl logs caddy-gvisor
+  Restart: nerdctl restart caddy-gvisor
+  
+  === gVisor Details ===
+  Runtime: runsc (gVisor)
+  Version: runsc --version
+  Container running with gVisor sandbox isolation
+  
+  Caddy auto-starts on boot via systemd service.

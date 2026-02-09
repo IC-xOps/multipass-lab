@@ -1,0 +1,552 @@
+# 🦭 Podman VMs for Multipass
+
+Two different approaches to running containers on macOS using Multipass VMs:
+
+1. **[Podman VM](#-podman-vm)** - Rootless Podman for secure, daemonless containers
+2. **[Docker-in-Podman VM](#-docker-in-podman-vm)** - Docker Engine running inside a Podman container
+
+---
+
+## 📋 Prerequisites
+
+- [Multipass](https://multipass.run/) installed on macOS
+- [Podman Desktop](https://podman-desktop.io/) (optional, for GUI management)
+
+```bash
+brew install --cask multipass
+brew install --cask podman-desktop  # Optional
+```
+
+---
+
+# 🦭 Podman VM
+
+A fully configured rootless Podman environment running in a Multipass Ubuntu VM with Docker compatibility and socket support for Podman Desktop integration.
+
+## Features
+
+- **Rootless Podman 4.9.3** - Secure containerization without root privileges
+- **Docker compatibility** - `podman-docker` alias support
+- **Socket support** - User and system sockets for remote management
+- **Podman Desktop ready** - Connect from macOS via SSH tunnel
+- **Optimized settings** - Proper subuid/subgid, cgroup systemd, overlay storage
+- **41 comprehensive tests** - Full validation suite
+
+---
+
+## Quick Start
+
+### 1. Create the VM
+
+```bash
+cd Podman
+multipass launch --name podman-vm --cloud-init podman.yaml --cpus 2 --memory 4G --disk 20G
+```
+
+### 2. Run Tests
+
+```bash
+./test-podman-vm.sh
+```
+
+### 3. Access the VM
+
+```bash
+multipass shell podman-vm
+```
+
+---
+
+## Test Suite - 41 Tests
+
+```bash
+./test-podman-vm.sh
+```
+
+**Test Categories:**
+
+| Category | Tests |
+|----------|-------|
+| **Prerequisites** | Multipass installation |
+| **VM Status** | Exists, Running |
+| **Cloud-Init** | Completion status |
+| **Podman Installation** | Version, podman-docker, slirp4netns, fuse-overlayfs, uidmap |
+| **Post-Installation** | Subuid/subgid, linger, registries, containers.conf, cgroup manager |
+| **Permissions** | Home directory, .config, .local, XDG_RUNTIME_DIR, rootless mode |
+| **Sockets** | User socket (enabled/active/exists), System socket |
+| **Functionality** | Pull images, Run containers, Volumes, Bind mounts, Port mapping |
+| **Docker Compatibility** | Docker CLI, Podman redirect, docker run |
+| **Network** | Internet, DNS, Registry connectivity |
+| **Resources** | Disk space, Memory, Podman storage |
+| **Common Issues** | Zombie containers, Dangling images, Storage driver, OCI runtime |
+
+---
+
+## What's Included
+
+**Configuration Files:**
+- `podman.yaml` - Cloud-init configuration
+- `test-podman-vm.sh` - Test suite (41 tests)
+
+**Inside the VM:**
+- `~/test-podman.sh` - Quick Podman test script
+- `~/.config/containers/containers.conf` - User container configuration
+- `/etc/containers/registries.conf` - Container registry configuration
+
+---
+
+## Socket Paths
+
+| Type | Path | Description |
+|------|------|-------------|
+| **User (rootless)** | `/run/user/1000/podman/podman.sock` | Recommended for security |
+| **System (root)** | `/run/podman/podman.sock` | For privileged operations |
+| **macOS forwarded** | `/tmp/podman.sock` | Via SSH tunnel |
+
+---
+
+## Connect Podman Desktop from macOS
+
+### Method 1: SSH Socket Forwarding (Recommended)
+
+#### Step 1: Copy SSH Key to VM
+
+```bash
+multipass exec podman-vm -- bash -c "echo '$(cat ~/.ssh/id_rsa.pub)' >> ~/.ssh/authorized_keys"
+```
+
+#### Step 2: Get VM IP
+
+```bash
+multipass info podman-vm | grep IPv4
+```
+
+#### Step 3: Forward the Socket
+
+```bash
+# For rootless Podman (recommended)
+ssh -nNT -L /tmp/podman.sock:/run/user/1000/podman/podman.sock ubuntu@<VM-IP>
+
+# For root Podman
+ssh -nNT -L /tmp/podman.sock:/run/podman/podman.sock ubuntu@<VM-IP>
+```
+
+> 💡 Keep this terminal open or add `&` to background it.
+
+#### Step 4: Configure Podman Desktop
+
+1. Open **Podman Desktop**
+2. Go to **Settings** → **Resources**
+3. Click **Create new** under Podman connections
+4. Configure:
+   - **Name:** `Multipass VM`
+   - **Socket Path:** `/tmp/podman.sock`
+5. Click **Connect**
+
+---
+
+### Method 2: Persistent Tunnel with autossh
+
+```bash
+# Install autossh
+brew install autossh
+
+# Create tunnel script
+cat > ~/podman-tunnel.sh << 'EOF'
+#!/bin/bash
+VM_IP=$(multipass info podman-vm | grep IPv4 | awk '{print $2}')
+autossh -M 0 -nNT -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" \
+  -L /tmp/podman.sock:/run/user/1000/podman/podman.sock ubuntu@$VM_IP
+EOF
+chmod +x ~/podman-tunnel.sh
+
+# Run it
+~/podman-tunnel.sh &
+```
+
+---
+
+### Method 3: Direct CLI Connection
+
+```bash
+# Get VM IP
+VM_IP=$(multipass info podman-vm | grep IPv4 | awk '{print $2}')
+
+# Set environment variable
+export PODMAN_HOST="ssh://ubuntu@$VM_IP/run/user/1000/podman/podman.sock"
+
+# Now podman commands use the VM
+podman ps
+podman images
+```
+
+---
+
+## Configuration Details
+
+### Rootless Setup
+
+The VM is configured for secure rootless container operation:
+
+- **Subuid/Subgid:** `100000-165535` mapped to ubuntu user
+- **User linger:** Enabled for persistent user services
+- **Cgroup manager:** systemd
+- **Storage driver:** overlay (optimal)
+- **OCI runtime:** crun
+
+### Container Registries
+
+Pre-configured in `/etc/containers/registries.conf`:
+
+```toml
+unqualified-search-registries = ["docker.io"]
+
+[[registry]]
+location = "docker.io"
+
+[[registry]]
+location = "quay.io"
+
+[[registry]]
+location = "gcr.io"
+```
+
+### User Configuration
+
+Located at `~/.config/containers/containers.conf`:
+
+```toml
+[containers]
+log_driver = "k8s-file"
+
+[engine]
+cgroup_manager = "systemd"
+events_logger = "journald"
+```
+
+---
+
+## Useful Commands
+
+### Multipass
+
+| Command | Description |
+|---------|-------------|
+| `multipass list` | List all VMs |
+| `multipass shell podman-vm` | SSH into VM |
+| `multipass info podman-vm` | VM details and IP |
+| `multipass stop podman-vm` | Stop VM |
+| `multipass start podman-vm` | Start VM |
+| `multipass delete podman-vm && multipass purge` | Delete VM |
+
+### Podman
+
+| Command | Description |
+|---------|-------------|
+| `podman ps` | List running containers |
+| `podman ps -a` | List all containers |
+| `podman images` | List images |
+| `podman run --rm hello-world` | Test container |
+| `podman run -d -p 8080:80 nginx` | Run Nginx |
+| `podman logs <container>` | View logs |
+| `podman exec -it <container> bash` | Shell into container |
+| `podman system prune -a` | Clean up |
+
+### Systemd Socket Management
+
+| Command | Description |
+|---------|-------------|
+| `systemctl --user status podman.socket` | Check user socket |
+| `systemctl --user restart podman.socket` | Restart user socket |
+| `sudo systemctl status podman.socket` | Check system socket |
+
+---
+
+## 🔍 Troubleshooting
+
+### Standard Podman VM
+
+#### Socket Not Available
+
+```bash
+# Restart the socket
+multipass exec podman-vm -- systemctl --user restart podman.socket
+multipass exec podman-vm -- systemctl --user status podman.socket
+```
+
+#### Permission Denied
+
+```bash
+# Check linger status
+multipass exec podman-vm -- loginctl show-user ubuntu | grep Linger
+
+# Enable linger if needed
+multipass exec podman-vm -- sudo loginctl enable-linger ubuntu
+```
+
+#### Connection Refused from macOS
+
+1. Verify VM is running:
+   ```bash
+   multipass list
+   ```
+
+2. Check socket exists:
+   ```bash
+   multipass exec podman-vm -- ls -la /run/user/1000/podman/podman.sock
+   ```
+
+3. Verify SSH tunnel:
+   ```bash
+   ls -la /tmp/podman.sock
+   ```
+
+4. Clean up stale socket:
+   ```bash
+   rm -f /tmp/podman.sock
+   ```
+
+#### Subuid/Subgid Issues
+
+```bash
+# Verify configuration
+multipass exec podman-vm -- cat /etc/subuid
+multipass exec podman-vm -- cat /etc/subgid
+
+# Reset if needed
+multipass exec podman-vm -- sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 ubuntu
+```
+
+#### Clean Up Resources
+
+```bash
+# Remove stopped containers
+podman container prune -f
+
+# Remove unused images
+podman image prune -a -f
+
+# Remove unused volumes
+podman volume prune -f
+
+# Remove everything
+podman system prune -a --volumes -f
+```
+
+### Docker-in-Podman VM
+
+#### Docker Container Not Running
+
+```bash
+# Check container status
+multipass exec docker-in-podman-vm -- sudo podman ps -a
+
+# Start manually
+multipass exec docker-in-podman-vm -- ~/start-docker-container.sh
+
+# Check logs
+multipass exec docker-in-podman-vm -- sudo podman logs docker-engine
+```
+
+#### Docker Daemon Not Responding
+
+```bash
+# Restart the container
+multipass exec docker-in-podman-vm -- sudo systemctl restart docker-in-podman.service
+
+# Check daemon status inside container
+multipass exec docker-in-podman-vm -- /home/ubuntu/docker info
+```
+
+#### Systemd Service Issues
+
+```bash
+# Check service status
+multipass exec docker-in-podman-vm -- sudo systemctl status docker-in-podman.service
+
+# View service logs
+multipass exec docker-in-podman-vm -- sudo journalctl -u docker-in-podman.service -n 50
+
+# Restart service
+multipass exec docker-in-podman-vm -- sudo systemctl restart docker-in-podman.service
+```
+
+#### Workspace Not Accessible
+
+```bash
+# Verify mount inside container
+multipass exec docker-in-podman-vm -- sudo podman exec docker-engine ls -la /workspace
+
+# Test file creation
+multipass exec docker-in-podman-vm -- bash -c 'echo "test" > ~/workspace/test.txt'
+multipass exec docker-in-podman-vm -- /home/ubuntu/docker run --rm -v /workspace:/test alpine cat /test/test.txt
+```
+
+#### Clean Up Docker Resources
+
+```bash
+# From macOS
+multipass exec docker-in-podman-vm -- /home/ubuntu/docker system prune -a --volumes -f
+
+# Or inside VM
+multipass shell docker-in-podman-vm
+docker system prune -a --volumes -f
+```
+
+---
+
+## 🐳 Docker-in-Podman Details
+
+### How It Works
+
+The Docker-in-Podman VM runs Docker Engine inside a privileged Podman container:
+
+```
+macOS Host
+  └─ Multipass VM (Ubuntu 24.04)
+      └─ Podman 4.9.3 (root mode)
+          └─ Docker Container (docker:27.3-dind)
+              └─ Docker Engine 27.3.1
+                  └─ Your Docker containers
+```
+
+### Architecture
+
+- **Podman Host**: Runs at system level for privileged container support
+- **Docker Container**: Privileged container with `cgroupns=host`
+- **Docker Daemon**: Listens on `/var/run/docker.sock` (inside container)
+- **Wrappers**: `~/docker` and `~/docker-compose` execute via `podman exec`
+- **Data Persistence**: `docker-data` Podman volume mounted to `/var/lib/docker`
+- **Workspace**: `/home/ubuntu/workspace` shared with `/workspace` in Docker
+
+### Version Pinning
+
+For stability, Docker version is pinned:
+- **Docker Image**: `docker.io/library/docker:27.3-dind`
+- **Docker Version**: 27.3.1
+- **Docker Compose**: v2.31.0 (included in image)
+
+### CLI Wrappers
+
+The `~/docker` wrapper script:
+```bash
+#!/bin/bash
+CONTAINER_NAME="docker-engine"
+
+if ! sudo podman ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+    echo "Error: Docker container '$CONTAINER_NAME' is not running"
+    echo "Start it with: ~/start-docker-container.sh"
+    exit 1
+fi
+
+sudo podman exec -i $CONTAINER_NAME docker "$@"
+```
+
+### Auto-Start
+
+Docker container automatically starts on boot via systemd:
+```bash
+# Check service status
+systemctl status docker-in-podman.service
+
+# Restart service
+sudo systemctl restart docker-in-podman.service
+```
+
+### Usage Examples
+
+```bash
+# Basic commands
+docker ps
+docker images
+docker run -d nginx
+docker logs <container-id>
+
+# Docker Compose
+docker-compose up -d
+docker-compose ps
+docker-compose down
+
+# Building images
+cd ~/workspace/myapp
+docker build -t myapp .
+docker run -d -p 8080:80 myapp
+
+# Volumes (persisted in Podman volume)
+docker volume create mydata
+docker run -v mydata:/data alpine
+```
+
+---
+
+## 🐳 Docker Compatibility (Standard Podman)
+
+The VM includes `podman-docker` for Docker CLI compatibility:
+
+```bash
+# These work the same
+docker run --rm hello-world
+podman run --rm hello-world
+
+# Docker Compose alternative
+podman-compose up -d
+# Or use podman directly
+podman compose up -d  # (if podman-compose plugin installed)
+```
+
+---
+
+## 📊 VM Specifications
+
+| Resource | Default | Recommended |
+|----------|---------|-------------|
+| CPUs | 2 | 2-4 |
+| Memory | 4GB | 4-8GB |
+| Disk | 20GB | 20-50GB |
+
+Adjust resources when creating the VM:
+
+```bash
+# Standard Podman
+multipass launch --name podman-vm --cloud-init podman.yaml \
+  --cpus 4 --memory 8G --disk 50G
+
+# Docker-in-Podman  
+multipass launch --name docker-in-podman-vm --cloud-init docker-in-podman.yaml \
+  --cpus 4 --memory 8G --disk 50G
+```
+
+---
+
+## 📈 Test Results Summary
+
+| VM Configuration | Tests Passed | Status |
+|-----------------|--------------|---------|
+| **Standard Podman** | 41/41 | ✅ All tests passed |
+| **Docker-in-Podman** | 48/48 | ✅ All tests passed |
+
+**Total:** 89 tests across both VMs
+
+---
+
+## 🆚 Choosing the Right VM
+
+### Use **Standard Podman VM** when:
+- You want rootless, secure container runtime
+- You need Podman Desktop integration
+- You prefer Podman's daemonless architecture
+- You need OCI container compatibility
+- Security is a top priority
+
+### Use **Docker-in-Podman VM** when:
+- You need actual Docker Engine compatibility
+- You have projects requiring Docker-specific features
+- You want to test Docker in an isolated environment
+- You need Docker Compose with full compatibility
+- You're migrating from Docker to Podman gradually
+
+---
+
+## 📝 License
+
+MIT License - Feel free to use and modify as needed.

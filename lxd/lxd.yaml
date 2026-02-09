@@ -1,0 +1,198 @@
+#cloud-config
+
+# LXD Installation and Configuration
+# System container and VM management with LXD
+# Pinned versions for stability (Ubuntu 24.04 LTS)
+
+package_update: true
+package_upgrade: true
+
+snap:
+  commands:
+    - snap install lxd --channel=6.1/stable
+
+packages:
+  - snapd
+  - bridge-utils
+  - zfsutils-linux
+  - btrfs-progs
+  - thin-provisioning-tools
+  - lvm2
+  - curl
+  - wget
+  - jq
+
+write_files:
+  - path: /home/ubuntu/lxd-preseed.yaml
+    permissions: '0644'
+    content: |
+      config:
+        core.https_address: "[::]:8443"
+      networks:
+        - name: lxdbr0
+          type: bridge
+          config:
+            ipv4.address: 10.10.10.1/24
+            ipv4.nat: "true"
+            ipv6.address: none
+      storage_pools:
+        - name: default
+          driver: dir
+      profiles:
+        - name: default
+          config: {}
+          devices:
+            eth0:
+              name: eth0
+              network: lxdbr0
+              type: nic
+            root:
+              path: /
+              pool: default
+              type: disk
+
+  - path: /home/ubuntu/test-lxd.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      echo "=== Testing LXD Installation ==="
+      echo ""
+      echo "LXD version:"
+      lxd --version
+      echo ""
+      echo "LXC client version:"
+      lxc --version
+      echo ""
+      echo "LXD storage pools:"
+      lxc storage list
+      echo ""
+      echo "LXD networks:"
+      lxc network list
+      echo ""
+      echo "LXD profiles:"
+      lxc profile list
+      echo ""
+      echo "Launching test container..."
+      lxc launch ubuntu:22.04 test-container
+      sleep 5
+      echo ""
+      echo "Container status:"
+      lxc list
+      echo ""
+      echo "Exec into container:"
+      lxc exec test-container -- cat /etc/os-release
+      echo ""
+      echo "Cleaning up..."
+      lxc delete test-container --force
+      echo ""
+      echo "=== LXD Test Complete ==="
+
+  - path: /home/ubuntu/examples/web-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        limits.cpu: "2"
+        limits.memory: 1GB
+      description: Web server profile
+      devices:
+        eth0:
+          name: eth0
+          network: lxdbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          size: 10GB
+          type: disk
+
+  - path: /home/ubuntu/examples/docker-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        security.nesting: "true"
+        security.syscalls.intercept.mknod: "true"
+        security.syscalls.intercept.setxattr: "true"
+      description: Profile for running Docker inside LXD
+      devices:
+        eth0:
+          name: eth0
+          network: lxdbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+
+runcmd:
+  # Ensure snapd is ready
+  - systemctl enable --now snapd.socket
+  - sleep 5
+  - snap wait system seed.loaded
+
+  # Install LXD from snap (6.1 stable for reproducibility)
+  - snap install lxd --channel=6.1/stable
+
+  # Wait for LXD snap to be ready
+  - sleep 10
+
+  # Add ubuntu user to lxd group
+  - usermod -aG lxd ubuntu
+
+  # Ensure home directory ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+  # Initialize LXD with preseed configuration
+  - cat /home/ubuntu/lxd-preseed.yaml | lxd init --preseed
+
+  # Wait for LXD to be fully initialized
+  - sleep 5
+
+  # Configure remote image servers
+  - lxc remote add images https://images.linuxcontainers.org --protocol=simplestreams --accept-certificate || true
+
+  # Pre-download Ubuntu 22.04 image for faster container launches
+  - "lxc image copy ubuntu:22.04 local: --alias ubuntu-22.04 || true"
+
+  # Create and configure a test web container
+  - lxc launch ubuntu:22.04 web-test
+  - sleep 10
+  - lxc exec web-test -- apt-get update
+  - lxc exec web-test -- apt-get install -y nginx
+  - lxc exec web-test -- systemctl enable nginx
+  - lxc exec web-test -- systemctl start nginx
+  
+  # Add proxy device to expose port 8080 on VM to container's port 80
+  - lxc config device add web-test http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80
+
+  # Set up bash completion for lxc
+  - snap set lxd ui.enable=true || true
+
+  # Create examples directory structure
+  - mkdir -p /home/ubuntu/examples
+  - chown -R ubuntu:ubuntu /home/ubuntu/examples
+
+final_message: |
+  LXD installation complete!
+  
+  === Quick Start ===
+  1. SSH into the VM: multipass shell lxd-vm
+  2. Test web container: curl http://localhost:8080
+  3. Run full test suite: ./test-lxd-vm.sh (from host)
+  
+  === Pre-deployed Container ===
+  web-test: Ubuntu 22.04 with nginx (port 8080)
+  
+  === Basic Commands ===
+  lxc list                              # List containers
+  lxc launch ubuntu:22.04 mycontainer   # Create container
+  lxc exec mycontainer -- bash          # Shell into container
+  lxc stop mycontainer                  # Stop container
+  lxc delete mycontainer                # Delete container
+  
+  === Container vs VM ===
+  lxc launch ubuntu:22.04 mycontainer           # System container
+  lxc launch ubuntu:22.04 myvm --vm             # Virtual machine
+  
+  === Remote Access ===
+  API available at: https://<vm-ip>:8443
+  Web test: http://<vm-ip>:8080
