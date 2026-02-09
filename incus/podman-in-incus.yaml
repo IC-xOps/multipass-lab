@@ -1,0 +1,209 @@
+#cloud-config
+
+# Podman-in-Incus Installation and Configuration
+# Run Podman containers inside Incus system containers
+# Podman is daemonless and rootless by default
+# Installed via Zabbly repository for Ubuntu 24.04 LTS
+# Pinned to Incus 6.x LTS for stability
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - bridge-utils
+  - curl
+  - wget
+  - jq
+  - gpg
+  - python3-pip
+
+write_files:
+  - path: /home/ubuntu/incus-preseed.yaml
+    permissions: '0644'
+    content: |
+      config:
+        core.https_address: "[::]:8443"
+      networks:
+        - name: incusbr0
+          type: bridge
+          config:
+            ipv4.address: 10.30.30.1/24
+            ipv4.nat: "true"
+            ipv6.address: none
+      storage_pools:
+        - name: default
+          driver: dir
+      profiles:
+        - name: default
+          config: {}
+          devices:
+            eth0:
+              name: eth0
+              network: incusbr0
+              type: nic
+            root:
+              path: /
+              pool: default
+              type: disk
+
+  # Disable AppArmor unprivileged userns restriction (Ubuntu 24.04)
+  # Required for rootless Podman inside nested Incus containers
+  - path: /etc/sysctl.d/99-userns.conf
+    permissions: '0644'
+    content: |
+      kernel.apparmor_restrict_unprivileged_userns=0
+
+  - path: /home/ubuntu/podman-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        security.nesting: "true"
+        security.syscalls.intercept.mknod: "true"
+        security.syscalls.intercept.setxattr: "true"
+      description: Profile for running Podman inside Incus containers
+      devices:
+        eth0:
+          name: eth0
+          network: incusbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+
+  - path: /home/ubuntu/setup-podman-container.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Script to set up Podman inside an Incus container
+      
+      CONTAINER_NAME="${1:-podman-host}"
+      
+      echo "=== Setting up Podman in Incus container: $CONTAINER_NAME ==="
+      
+      # Check if container exists
+      if ! incus info "$CONTAINER_NAME" &>/dev/null; then
+          echo "Error: Container '$CONTAINER_NAME' does not exist"
+          exit 1
+      fi
+      
+      echo "Installing Podman..."
+      incus exec "$CONTAINER_NAME" -- apt-get update
+      incus exec "$CONTAINER_NAME" -- apt-get install -y podman slirp4netns fuse-overlayfs uidmap python3-pip
+      incus exec "$CONTAINER_NAME" -- pip3 install podman-compose
+      
+      echo "Configuring rootless Podman for ubuntu user..."
+      incus exec "$CONTAINER_NAME" -- bash -c 'echo "ubuntu:100000:65536" >> /etc/subuid'
+      incus exec "$CONTAINER_NAME" -- bash -c 'echo "ubuntu:100000:65536" >> /etc/subgid'
+      
+      echo "Verifying Podman installation..."
+      incus exec "$CONTAINER_NAME" -- podman --version
+      incus exec "$CONTAINER_NAME" -- podman info --format '{{.Host.OCIRuntime.Name}}'
+      
+      echo ""
+      echo "=== Podman setup complete in $CONTAINER_NAME ==="
+      echo ""
+      echo "Run containers as root:"
+      echo "  incus exec $CONTAINER_NAME -- podman run --rm docker.io/alpine echo hello"
+      echo ""
+      echo "Run containers as ubuntu (rootless):"
+      echo "  incus exec $CONTAINER_NAME -- sudo -u ubuntu podman run --rm docker.io/alpine echo hello"
+
+runcmd:
+  # Add Zabbly Incus repository
+  - mkdir -p /etc/apt/keyrings/
+  - curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+  - |
+    cat > /etc/apt/sources.list.d/zabbly-incus-lts.sources <<EOF
+    Enabled: yes
+    Types: deb
+    URIs: https://pkgs.zabbly.com/incus/lts-6.0
+    Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+    Components: main
+    Architectures: $(dpkg --print-architecture)
+    Signed-By: /etc/apt/keyrings/zabbly.asc
+    EOF
+
+  # Apply sysctl for rootless userns (AppArmor restriction on Ubuntu 24.04)
+  - sysctl -p /etc/sysctl.d/99-userns.conf
+
+  # Install Incus
+  - apt-get update
+  - apt-get install -y incus incus-client
+
+  # Wait for Incus to be ready
+  - sleep 5
+
+  # Add ubuntu user to incus-admin group
+  - usermod -aG incus-admin ubuntu
+
+  # Ensure home directory ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+  # Initialize Incus with preseed configuration
+  - cat /home/ubuntu/incus-preseed.yaml | incus admin init --preseed
+
+  # Wait for Incus to be fully initialized
+  - sleep 5
+
+  # Create the Podman profile from file
+  - incus profile create podman || true
+  - cat /home/ubuntu/podman-profile.yaml | incus profile edit podman
+
+  # Pre-download Ubuntu 22.04 image
+  - "incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 || true"
+
+  # Create Podman host container with the podman profile
+  - incus launch images:ubuntu/22.04 podman-host --profile default --profile podman
+  - sleep 15
+
+  # Install Podman and tools inside the container
+  - incus exec podman-host -- apt-get update
+  - incus exec podman-host -- apt-get install -y podman slirp4netns fuse-overlayfs uidmap python3-pip
+
+  # Install podman-compose via pip
+  - incus exec podman-host -- pip3 install podman-compose
+
+  # Configure subuid/subgid for rootless podman
+  - incus exec podman-host -- bash -c 'grep -q "^ubuntu:" /etc/subuid || echo "ubuntu:100000:65536" >> /etc/subuid'
+  - incus exec podman-host -- bash -c 'grep -q "^ubuntu:" /etc/subgid || echo "ubuntu:100000:65536" >> /etc/subgid'
+
+  # Enable lingering for rootless podman systemd support
+  - incus exec podman-host -- loginctl enable-linger ubuntu
+  - incus exec podman-host -- mkdir -p /home/ubuntu/.local/share/containers
+  - incus exec podman-host -- chown -R ubuntu:ubuntu /home/ubuntu/.local
+
+  # Pull nginx image and run container
+  - incus exec podman-host -- podman pull docker.io/nginx:alpine
+  - incus exec podman-host -- podman run -d --name web --restart always -p 80:80 docker.io/nginx:alpine
+
+  # Add proxy device to expose container's port 80 on VM port 8080
+  - incus config device add podman-host http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80
+
+  # Ensure ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+final_message: |
+  Podman-in-Incus installation complete!
+  
+  === What's Running ===
+  - Incus container: podman-host (with Podman profile)
+  - Podman container: nginx (inside podman-host)
+  - Web access: http://<vm-ip>:8080
+  
+  === Quick Test ===
+  curl http://localhost:8080
+  
+  === Access Podman ===
+  incus exec podman-host -- podman ps
+  incus exec podman-host -- podman images
+  
+  === Run More Containers ===
+  incus exec podman-host -- podman run -d --name myapp -p 8081:80 docker.io/nginx
+  
+  === Rootless Podman (as ubuntu user) ===
+  incus exec podman-host -- sudo -u ubuntu podman run --rm docker.io/alpine echo hello
+  
+  === Create Another Podman Host ===
+  incus launch images:ubuntu/22.04 my-podman --profile default --profile podman
+  ./setup-podman-container.sh my-podman

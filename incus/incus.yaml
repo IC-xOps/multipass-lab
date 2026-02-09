@@ -1,0 +1,202 @@
+#cloud-config
+
+# Incus Installation and Configuration
+# System container and VM management with Incus (LXD fork by Linux Containers)
+# Installed via Zabbly repository for Ubuntu 24.04 LTS
+# Pinned to Incus 6.x LTS for stability
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - bridge-utils
+  - zfsutils-linux
+  - btrfs-progs
+  - thin-provisioning-tools
+  - lvm2
+  - curl
+  - wget
+  - jq
+  - gpg
+
+write_files:
+  - path: /home/ubuntu/incus-preseed.yaml
+    permissions: '0644'
+    content: |
+      config:
+        core.https_address: "[::]:8443"
+      networks:
+        - name: incusbr0
+          type: bridge
+          config:
+            ipv4.address: 10.10.10.1/24
+            ipv4.nat: "true"
+            ipv6.address: none
+      storage_pools:
+        - name: default
+          driver: dir
+      profiles:
+        - name: default
+          config: {}
+          devices:
+            eth0:
+              name: eth0
+              network: incusbr0
+              type: nic
+            root:
+              path: /
+              pool: default
+              type: disk
+
+  - path: /home/ubuntu/test-incus.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      echo "=== Testing Incus Installation ==="
+      echo ""
+      echo "Incus version:"
+      incus version
+      echo ""
+      echo "Incus storage pools:"
+      incus storage list
+      echo ""
+      echo "Incus networks:"
+      incus network list
+      echo ""
+      echo "Incus profiles:"
+      incus profile list
+      echo ""
+      echo "Launching test container..."
+      incus launch images:ubuntu/22.04 test-container
+      sleep 5
+      echo ""
+      echo "Container status:"
+      incus list
+      echo ""
+      echo "Exec into container:"
+      incus exec test-container -- cat /etc/os-release
+      echo ""
+      echo "Cleaning up..."
+      incus delete test-container --force
+      echo ""
+      echo "=== Incus Test Complete ==="
+
+  - path: /home/ubuntu/examples/web-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        limits.cpu: "2"
+        limits.memory: 1GB
+      description: Web server profile
+      devices:
+        eth0:
+          name: eth0
+          network: incusbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          size: 10GB
+          type: disk
+
+  - path: /home/ubuntu/examples/docker-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        security.nesting: "true"
+        security.syscalls.intercept.mknod: "true"
+        security.syscalls.intercept.setxattr: "true"
+      description: Profile for running Docker inside Incus
+      devices:
+        eth0:
+          name: eth0
+          network: incusbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+
+runcmd:
+  # Add Zabbly Incus repository
+  - mkdir -p /etc/apt/keyrings/
+  - curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+  - |
+    cat > /etc/apt/sources.list.d/zabbly-incus-lts.sources <<EOF
+    Enabled: yes
+    Types: deb
+    URIs: https://pkgs.zabbly.com/incus/lts-6.0
+    Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+    Components: main
+    Architectures: $(dpkg --print-architecture)
+    Signed-By: /etc/apt/keyrings/zabbly.asc
+    EOF
+
+  # Install Incus
+  - apt-get update
+  - apt-get install -y incus incus-client
+
+  # Wait for Incus to be ready
+  - sleep 5
+
+  # Add ubuntu user to incus-admin group
+  - usermod -aG incus-admin ubuntu
+
+  # Ensure home directory ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+  # Initialize Incus with preseed configuration
+  - cat /home/ubuntu/incus-preseed.yaml | incus admin init --preseed
+
+  # Wait for Incus to be fully initialized
+  - sleep 5
+
+  # Configure remote image servers
+  - incus remote add images https://images.linuxcontainers.org --protocol=simplestreams --accept-certificate || true
+
+  # Pre-download Ubuntu 22.04 image for faster container launches
+  - "incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 || true"
+
+  # Create and configure a test web container
+  - incus launch images:ubuntu/22.04 web-test
+  - sleep 10
+  - incus exec web-test -- apt-get update
+  - incus exec web-test -- apt-get install -y nginx
+  - incus exec web-test -- systemctl enable nginx
+  - incus exec web-test -- systemctl start nginx
+
+  # Add proxy device to expose port 8080 on VM to container's port 80
+  - incus config device add web-test http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80
+
+  # Enable Incus UI (if available)
+  - incus config set core.https_address "[::]:8443" || true
+
+  # Create examples directory structure
+  - mkdir -p /home/ubuntu/examples
+  - chown -R ubuntu:ubuntu /home/ubuntu/examples
+
+final_message: |
+  Incus installation complete!
+  
+  === Quick Start ===
+  1. SSH into the VM: multipass shell incus-vm
+  2. Test web container: curl http://localhost:8080
+  3. Run full test suite: ./test-incus-vm.sh (from host)
+  
+  === Pre-deployed Container ===
+  web-test: Ubuntu 22.04 with nginx (port 8080)
+  
+  === Basic Commands ===
+  incus list                                    # List containers
+  incus launch images:ubuntu/22.04 mycontainer  # Create container
+  incus exec mycontainer -- bash                # Shell into container
+  incus stop mycontainer                        # Stop container
+  incus delete mycontainer                      # Delete container
+  
+  === Container vs VM ===
+  incus launch images:ubuntu/22.04 mycontainer       # System container
+  incus launch images:ubuntu/22.04 myvm --vm         # Virtual machine
+  
+  === Remote Access ===
+  API available at: https://<vm-ip>:8443
+  Web test: http://<vm-ip>:8080

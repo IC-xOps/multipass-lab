@@ -1,0 +1,201 @@
+#cloud-config
+
+# Docker-in-Incus Installation and Configuration
+# Run Docker containers inside Incus system containers
+# Requires special security settings for nested containerization
+# Installed via Zabbly repository for Ubuntu 24.04 LTS
+# Pinned to Incus 6.x LTS for stability
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - bridge-utils
+  - curl
+  - wget
+  - jq
+  - gpg
+
+write_files:
+  - path: /home/ubuntu/incus-preseed.yaml
+    permissions: '0644'
+    content: |
+      config:
+        core.https_address: "[::]:8443"
+      networks:
+        - name: incusbr0
+          type: bridge
+          config:
+            ipv4.address: 10.20.20.1/24
+            ipv4.nat: "true"
+            ipv6.address: none
+      storage_pools:
+        - name: default
+          driver: dir
+      profiles:
+        - name: default
+          config: {}
+          devices:
+            eth0:
+              name: eth0
+              network: incusbr0
+              type: nic
+            root:
+              path: /
+              pool: default
+              type: disk
+
+  - path: /home/ubuntu/docker-profile.yaml
+    permissions: '0644'
+    content: |
+      config:
+        security.nesting: "true"
+        security.syscalls.intercept.mknod: "true"
+        security.syscalls.intercept.setxattr: "true"
+      description: Profile for running Docker inside Incus containers
+      devices:
+        eth0:
+          name: eth0
+          network: incusbr0
+          type: nic
+        root:
+          path: /
+          pool: default
+          type: disk
+
+  - path: /home/ubuntu/setup-docker-container.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Script to set up Docker inside an Incus container
+      
+      CONTAINER_NAME="${1:-docker-host}"
+      
+      echo "=== Setting up Docker in Incus container: $CONTAINER_NAME ==="
+      
+      # Check if container exists
+      if ! incus info "$CONTAINER_NAME" &>/dev/null; then
+          echo "Error: Container '$CONTAINER_NAME' does not exist"
+          exit 1
+      fi
+      
+      echo "Installing Docker..."
+      incus exec "$CONTAINER_NAME" -- apt-get update
+      incus exec "$CONTAINER_NAME" -- apt-get install -y \
+          ca-certificates \
+          curl \
+          gnupg \
+          lsb-release
+      
+      echo "Adding Docker GPG key..."
+      incus exec "$CONTAINER_NAME" -- bash -c 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
+      
+      echo "Adding Docker repository..."
+      incus exec "$CONTAINER_NAME" -- bash -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list'
+      
+      echo "Installing Docker Engine..."
+      incus exec "$CONTAINER_NAME" -- apt-get update
+      incus exec "$CONTAINER_NAME" -- apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      
+      echo "Starting Docker..."
+      incus exec "$CONTAINER_NAME" -- systemctl enable docker
+      incus exec "$CONTAINER_NAME" -- systemctl start docker
+      
+      echo "Verifying Docker installation..."
+      incus exec "$CONTAINER_NAME" -- docker --version
+      incus exec "$CONTAINER_NAME" -- docker run --rm hello-world
+      
+      echo ""
+      echo "=== Docker setup complete in $CONTAINER_NAME ==="
+
+runcmd:
+  # Add Zabbly Incus repository
+  - mkdir -p /etc/apt/keyrings/
+  - curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+  - |
+    cat > /etc/apt/sources.list.d/zabbly-incus-lts.sources <<EOF
+    Enabled: yes
+    Types: deb
+    URIs: https://pkgs.zabbly.com/incus/lts-6.0
+    Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+    Components: main
+    Architectures: $(dpkg --print-architecture)
+    Signed-By: /etc/apt/keyrings/zabbly.asc
+    EOF
+
+  # Install Incus
+  - apt-get update
+  - apt-get install -y incus incus-client
+
+  # Wait for Incus to be ready
+  - sleep 5
+
+  # Add ubuntu user to incus-admin group
+  - usermod -aG incus-admin ubuntu
+
+  # Ensure home directory ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+  # Initialize Incus with preseed configuration
+  - cat /home/ubuntu/incus-preseed.yaml | incus admin init --preseed
+
+  # Wait for Incus to be fully initialized
+  - sleep 5
+
+  # Create the Docker profile from file
+  - incus profile create docker || true
+  - cat /home/ubuntu/docker-profile.yaml | incus profile edit docker
+
+  # Pre-download Ubuntu 22.04 image
+  - "incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 || true"
+
+  # Create Docker host container with the docker profile
+  - incus launch images:ubuntu/22.04 docker-host --profile default --profile docker
+  - sleep 15
+
+  # Install Docker inside the container
+  - incus exec docker-host -- apt-get update
+  - incus exec docker-host -- apt-get install -y ca-certificates curl gnupg lsb-release
+  - incus exec docker-host -- bash -c 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
+  - incus exec docker-host -- bash -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list'
+  - incus exec docker-host -- apt-get update
+  - incus exec docker-host -- apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+  # Add ubuntu user to docker group
+  - incus exec docker-host -- usermod -aG docker ubuntu
+
+  # Start Docker service
+  - incus exec docker-host -- systemctl enable docker
+  - incus exec docker-host -- systemctl start docker
+
+  # Run nginx container and expose it
+  - incus exec docker-host -- docker pull nginx:alpine
+  - incus exec docker-host -- docker run -d --name web --restart unless-stopped -p 80:80 nginx:alpine
+
+  # Add proxy device to expose container's port 80 on VM port 8080
+  - incus config device add docker-host http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80
+
+  # Ensure ownership
+  - chown -R ubuntu:ubuntu /home/ubuntu
+
+final_message: |
+  Docker-in-Incus installation complete!
+  
+  === What's Running ===
+  - Incus container: docker-host (with Docker profile)
+  - Docker container: nginx (inside docker-host)
+  - Web access: http://<vm-ip>:8080
+  
+  === Quick Test ===
+  curl http://localhost:8080
+  
+  === Access Docker ===
+  incus exec docker-host -- docker ps
+  incus exec docker-host -- docker images
+  
+  === Run More Containers ===
+  incus exec docker-host -- docker run -d --name myapp -p 8080:80 nginx
+  
+  === Create Another Docker Host ===
+  incus launch images:ubuntu/22.04 my-docker --profile default --profile docker
+  ./setup-docker-container.sh my-docker
