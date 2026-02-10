@@ -151,7 +151,7 @@ test_podman_installation() {
     fi
     
     print_test "Podman (root) can run containers"
-    POD_TEST=$(podman_exec run --rm alpine echo test 2>/dev/null)
+    POD_TEST=$(podman_exec run --rm alpine:3.21 echo test 2>/dev/null)
     if [ "$POD_TEST" == "test" ]; then
         print_pass "Podman can run containers"
     else
@@ -356,14 +356,14 @@ test_docker_functionality() {
     fi
     
     print_test "Pull image"
-    if docker_exec_quiet pull alpine:latest; then
+    if docker_exec_quiet pull alpine:3.21; then
         print_pass "Image pull works"
     else
         print_fail "Image pull failed"
     fi
     
     print_test "Run container"
-    OUTPUT=$(docker_exec run --rm alpine echo "hello-from-docker-in-podman" 2>/dev/null)
+    OUTPUT=$(docker_exec run --rm alpine:3.21 echo "hello-from-docker-in-podman" 2>/dev/null)
     if echo "$OUTPUT" | grep -q "hello-from-docker-in-podman"; then
         print_pass "Container run works"
     else
@@ -371,7 +371,7 @@ test_docker_functionality() {
     fi
     
     print_test "Run hello-world"
-    if docker_exec_quiet run --rm hello-world; then
+    if docker_exec_quiet run --rm hello-world:linux; then
         print_pass "hello-world container works"
     else
         print_fail "hello-world failed"
@@ -394,7 +394,7 @@ test_docker_functionality() {
     fi
     
     print_test "Docker build"
-    BUILD_OUTPUT=$(vm_exec_output bash -c 'echo "FROM alpine" | /home/ubuntu/docker build -t test-build - 2>&1')
+    BUILD_OUTPUT=$(vm_exec_output bash -c 'echo "FROM alpine:3.21" | /home/ubuntu/docker build -t test-build - 2>&1')
     if echo "$BUILD_OUTPUT" | grep -q "Successfully\|naming to"; then
         print_pass "Docker build works"
         docker_exec_quiet rmi test-build
@@ -419,7 +419,7 @@ test_nested_containers() {
     
     print_test "Docker containers isolated from host Podman"
     # Run a container in Docker
-    docker_exec_quiet run -d --name test-isolation alpine sleep 300
+    docker_exec_quiet run -d --name test-isolation alpine:3.21 sleep 300
     
     # Check if host Podman can see it (it shouldn't)
     HOST_ALL=$(podman_exec ps -a --format "{{.Names}}")
@@ -433,7 +433,7 @@ test_nested_containers() {
     docker_exec_quiet rm -f test-isolation
     
     print_test "Docker can see its own containers"
-    docker_exec_quiet run -d --name visible-test alpine sleep 30
+    docker_exec_quiet run -d --name visible-test alpine:3.21 sleep 30
     DOCKER_CONTAINERS=$(docker_exec ps --format "{{.Names}}" 2>/dev/null)
     if echo "$DOCKER_CONTAINERS" | grep -q "visible-test"; then
         print_pass "Docker sees its own containers"
@@ -465,7 +465,7 @@ test_persistence() {
     vm_exec_output bash -c 'echo "test-workspace-access" > /home/ubuntu/workspace/test-file.txt' >/dev/null
     
     # Check if accessible from Docker by running a container with workspace mounted
-    FILE_CONTENT=$(docker_exec run --rm -v /workspace:/test alpine cat /test/test-file.txt 2>/dev/null)
+    FILE_CONTENT=$(docker_exec run --rm -v /workspace:/test alpine:3.21 cat /test/test-file.txt 2>/dev/null)
     if [ "$FILE_CONTENT" == "test-workspace-access" ]; then
         print_pass "Workspace shared between host and Docker"
     else
@@ -513,21 +513,21 @@ test_network() {
     print_header "Testing Network"
     
     print_test "Docker has internet access"
-    if docker_exec_quiet run --rm alpine ping -c 1 8.8.8.8; then
+    if docker_exec_quiet run --rm alpine:3.21 ping -c 1 8.8.8.8; then
         print_pass "Docker containers have internet access"
     else
         print_fail "Docker containers have no internet access"
     fi
     
     print_test "Docker DNS resolution"
-    if docker_exec_quiet run --rm alpine ping -c 1 google.com; then
+    if docker_exec_quiet run --rm alpine:3.21 ping -c 1 google.com; then
         print_pass "Docker DNS resolution works"
     else
         print_fail "Docker DNS resolution failed"
     fi
     
     print_test "Docker Hub accessible"
-    if docker_exec_quiet pull hello-world; then
+    if docker_exec_quiet pull hello-world:linux; then
         print_pass "Docker Hub accessible"
     else
         print_fail "Cannot reach Docker Hub"

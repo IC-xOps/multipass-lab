@@ -370,7 +370,7 @@ test_podman_operations() {
     
     # Test podman run (use file redirect to avoid capture issues)
     print_test "Podman run works"
-    if multipass exec "$VM_NAME" -- lxc exec podman-host -- podman run --rm docker.io/alpine echo "hello" > "$TMPFILE" 2>&1; then
+    if multipass exec "$VM_NAME" -- lxc exec podman-host -- podman run --rm docker.io/alpine:3.21 echo "hello" > "$TMPFILE" 2>&1; then
         if grep -q "hello" "$TMPFILE"; then
             pass
         else
@@ -394,7 +394,7 @@ test_podman_operations() {
     
     # Test podman networking
     print_test "Podman container networking"
-    if multipass exec "$VM_NAME" -- lxc exec podman-host -- podman run --rm docker.io/alpine ping -c 1 -W 3 8.8.8.8 > "$TMPFILE" 2>&1; then
+    if multipass exec "$VM_NAME" -- lxc exec podman-host -- podman run --rm docker.io/alpine:3.21 ping -c 1 -W 3 8.8.8.8 > "$TMPFILE" 2>&1; then
         if grep -q "bytes from" "$TMPFILE"; then
             pass
         else
@@ -438,7 +438,7 @@ test_rootless_podman() {
     
     # Test rootless podman run
     print_test "Rootless podman works"
-    if multipass exec "$VM_NAME" -- lxc exec podman-host -- su - ubuntu -c 'podman run --rm docker.io/alpine echo rootless' > "$TMPFILE" 2>&1; then
+    if multipass exec "$VM_NAME" -- lxc exec podman-host -- su - ubuntu -c 'podman run --rm docker.io/alpine:3.21 echo rootless' > "$TMPFILE" 2>&1; then
         if grep -q "rootless" "$TMPFILE"; then
             pass
         else

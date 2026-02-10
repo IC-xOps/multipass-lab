@@ -511,7 +511,7 @@ test_docker_functionality() {
     
     # Test pulling an image
     print_test "Pull alpine image"
-    if vm_exec_rootless "docker pull alpine:latest"; then
+    if vm_exec_rootless "docker pull alpine:3.21"; then
         pass
     else
         fail "Failed to pull alpine image"
@@ -519,7 +519,7 @@ test_docker_functionality() {
     
     # Test running a container
     print_test "Run container (hello-world)"
-    if vm_exec_rootless "docker run --rm hello-world"; then
+    if vm_exec_rootless "docker run --rm hello-world:linux"; then
         pass
     else
         fail "Failed to run hello-world container"
@@ -527,7 +527,7 @@ test_docker_functionality() {
     
     # Test container with volume
     print_test "Run container with volume mount"
-    if vm_exec_rootless "docker run --rm -v /tmp:/data alpine ls /data"; then
+    if vm_exec_rootless "docker run --rm -v /tmp:/data alpine:3.21 ls /data"; then
         pass
     else
         fail "Failed to run container with volume"
@@ -535,7 +535,7 @@ test_docker_functionality() {
     
     # Test container with port mapping
     print_test "Run container with port mapping"
-    if vm_exec_rootless "docker run --rm -d -p 9999:80 --name nginx-test nginx:alpine"; then
+    if vm_exec_rootless "docker run --rm -d -p 9999:80 --name nginx-test nginx:1.28.2-alpine3.23"; then
         sleep 2
         if vm_exec "curl -s http://localhost:9999"; then
             pass
@@ -549,7 +549,7 @@ test_docker_functionality() {
     
     # Test docker exec
     print_test "Docker exec command"
-    vm_exec_rootless "docker run -d --name exec-test alpine sleep 60" || true
+    vm_exec_rootless "docker run -d --name exec-test alpine:3.21 sleep 60" || true
     if vm_exec_rootless "docker exec exec-test echo 'test'"; then
         pass
     else
@@ -560,7 +560,7 @@ test_docker_functionality() {
     # Test docker build
     print_test "Docker build command"
     vm_exec_rootless "mkdir -p /tmp/docker-build-test"
-    vm_exec_rootless "echo 'FROM alpine' > /tmp/docker-build-test/Dockerfile"
+    vm_exec_rootless "echo 'FROM alpine:3.21' > /tmp/docker-build-test/Dockerfile"
     vm_exec_rootless "echo 'RUN echo hello' >> /tmp/docker-build-test/Dockerfile"
     if vm_exec_rootless "docker build -t test-build:latest /tmp/docker-build-test"; then
         pass
@@ -607,8 +607,8 @@ test_network() {
     # Test container-to-container networking
     print_test "Container-to-container networking"
     vm_exec_rootless "docker network create c2c-test-net 2>/dev/null || true"
-    vm_exec_rootless "docker run -d --name c2c-server --network c2c-test-net alpine sleep 60" || true
-    if vm_exec_rootless "docker run --rm --network c2c-test-net alpine ping -c 1 c2c-server"; then
+    vm_exec_rootless "docker run -d --name c2c-server --network c2c-test-net alpine:3.21 sleep 60" || true
+    if vm_exec_rootless "docker run --rm --network c2c-test-net alpine:3.21 ping -c 1 c2c-server"; then
         pass
     else
         fail "Container networking failed"
@@ -618,7 +618,7 @@ test_network() {
     
     # Test outbound connectivity from container (using wget instead of ping - ICMP doesn't work in rootless)
     print_test "Container outbound connectivity"
-    if vm_exec_rootless "docker run --rm alpine wget -q -O /dev/null http://google.com"; then
+    if vm_exec_rootless "docker run --rm alpine:3.21 wget -q -O /dev/null http://google.com"; then
         pass
     else
         fail "Container cannot reach internet"
@@ -626,7 +626,7 @@ test_network() {
     
     # Test DNS resolution in container
     print_test "Container DNS resolution"
-    if vm_exec_rootless "docker run --rm alpine nslookup google.com"; then
+    if vm_exec_rootless "docker run --rm alpine:3.21 nslookup google.com"; then
         pass
     else
         fail "DNS resolution failed"
@@ -681,8 +681,8 @@ test_cleanup() {
     
     echo "  Removing test containers and images..."
     vm_exec_rootless "docker rm -f \$(docker ps -aq) 2>/dev/null || true"
-    vm_exec_rootless "docker rmi alpine:latest 2>/dev/null || true"
-    vm_exec_rootless "docker rmi nginx:alpine 2>/dev/null || true"
+    vm_exec_rootless "docker rmi alpine:3.21 2>/dev/null || true"
+    vm_exec_rootless "docker rmi nginx:1.28.2-alpine3.23 2>/dev/null || true"
     vm_exec_rootless "docker network prune -f 2>/dev/null || true"
     echo -e "  ${GREEN}✓ Cleanup complete${NC}"
 }

@@ -4,7 +4,8 @@
 # Run Docker containers inside Incus system containers
 # Requires special security settings for nested containerization
 # Installed via Zabbly repository for Ubuntu 24.04 LTS
-# Pinned to Incus 6.x LTS for stability
+# Pinned to Incus LTS 6.0 channel | Container images: nginx 1.28.2
+# Note: Docker packages inside Incus containers follow the container OS repo (Ubuntu 22.04)
 
 package_update: true
 package_upgrade: true
@@ -103,7 +104,7 @@ write_files:
       
       echo "Verifying Docker installation..."
       incus exec "$CONTAINER_NAME" -- docker --version
-      incus exec "$CONTAINER_NAME" -- docker run --rm hello-world
+      incus exec "$CONTAINER_NAME" -- docker run --rm hello-world:linux
       
       echo ""
       echo "=== Docker setup complete in $CONTAINER_NAME ==="
@@ -153,7 +154,7 @@ runcmd:
   - incus launch images:ubuntu/22.04 docker-host --profile default --profile docker
   - sleep 15
 
-  # Install Docker inside the container
+  # Install Docker inside the container (versions from Docker repo for container's Ubuntu 22.04)
   - incus exec docker-host -- apt-get update
   - incus exec docker-host -- apt-get install -y ca-certificates curl gnupg lsb-release
   - incus exec docker-host -- bash -c 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
@@ -169,8 +170,8 @@ runcmd:
   - incus exec docker-host -- systemctl start docker
 
   # Run nginx container and expose it
-  - incus exec docker-host -- docker pull nginx:alpine
-  - incus exec docker-host -- docker run -d --name web --restart unless-stopped -p 80:80 nginx:alpine
+  - incus exec docker-host -- docker pull nginx:1.28.2-alpine3.23
+  - incus exec docker-host -- docker run -d --name web --restart unless-stopped -p 80:80 nginx:1.28.2-alpine3.23
 
   # Add proxy device to expose container's port 80 on VM port 8080
   - incus config device add docker-host http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80

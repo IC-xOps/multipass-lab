@@ -2,6 +2,8 @@
 
 # Docker-in-gVisor VM with Caddy Webserver
 # Ubuntu 24.04 LTS with gVisor runtime and Caddy container
+# Pinned versions: gVisor 20240115.0 | nerdctl 1.7.6 | CNI 1.4.1 | Caddy 2.7.6
+# containerd 1.7.28 | runc 1.3.3
 
 hostname: docker-in-gvisor-vm
 
@@ -22,9 +24,9 @@ packages:
   - gnupg
   - lsb-release
   - software-properties-common
-  # Container runtime dependencies
-  - containerd
-  - runc
+  # Container runtime dependencies (pinned for stability)
+  - containerd=1.7.28-0ubuntu1~24.04.2
+  - runc=1.3.3-0ubuntu1~24.04.3
   # Network tools
   - net-tools
   - netcat-openbsd
@@ -299,7 +301,6 @@ write_files:
       [Service]
       Type=oneshot
       RemainAfterExit=yes
-      User=ubuntu
       WorkingDirectory=/home/ubuntu
       ExecStartPre=/usr/bin/sleep 10
       ExecStart=/home/ubuntu/deploy-caddy.sh
@@ -325,11 +326,15 @@ runcmd:
   - systemctl restart containerd
   - sleep 5
   
-  # Pull Caddy image
-  - sudo -u ubuntu /usr/local/bin/nerdctl pull caddy:2.7.6-alpine
+  # Pull Caddy image (using system containerd)
+  - nerdctl pull caddy:2.7.6-alpine
   
-  # Deploy Caddy container
-  - sudo -u ubuntu /home/ubuntu/deploy-caddy.sh
+  # Create caddy-data directory with correct ownership
+  - mkdir -p /home/ubuntu/caddy-data
+  - chown -R ubuntu:ubuntu /home/ubuntu/caddy-data
+  
+  # Deploy Caddy container (using system containerd)
+  - /home/ubuntu/deploy-caddy.sh
   
   # Enable auto-start service
   - systemctl daemon-reload

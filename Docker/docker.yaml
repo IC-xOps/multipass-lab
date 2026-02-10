@@ -1,5 +1,9 @@
 #cloud-config
 
+# Docker Engine Installation and Configuration
+# Pinned versions for stability (Ubuntu 24.04 LTS)
+# Docker packages: 29.2.1 | Containerd: 2.2.1 | Buildx: 0.31.1 | Compose: 5.0.2
+
 # Update package lists on first boot
 package_update: true
 package_upgrade: true
@@ -25,7 +29,7 @@ runcmd:
 
   # Update apt and install Docker
   - apt-get update
-  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - apt-get install -y docker-ce=5:29.2.1-1~ubuntu.24.04~noble docker-ce-cli=5:29.2.1-1~ubuntu.24.04~noble containerd.io=2.2.1-1~ubuntu.24.04~noble docker-buildx-plugin=0.31.1-1~ubuntu.24.04~noble docker-compose-plugin=5.0.2-1~ubuntu.24.04~noble
 
   # Add ubuntu user to docker group (allows running docker without sudo)
   - usermod -aG docker ubuntu
@@ -96,7 +100,7 @@ runcmd:
   - chown ubuntu:ubuntu /home/ubuntu/apply-docker-group.sh
 
   # POST-INSTALLATION: Set up bash completion for Docker
-  - curl -fsSL https://raw.githubusercontent.com/docker/cli/master/contrib/completion/bash/docker -o /etc/bash_completion.d/docker || true
+  - curl -fsSL https://raw.githubusercontent.com/docker/cli/v29.2.1/contrib/completion/bash/docker -o /etc/bash_completion.d/docker || true
 
   # POST-INSTALLATION: Configure sysctl settings for Docker networking
   - |
@@ -112,7 +116,7 @@ runcmd:
   - docker swarm init --advertise-addr $(hostname -I | awk '{print $1}') || true
 
   # Pull common images for convenience
-  - docker pull hello-world
+  - docker pull hello-world:linux
 
 # Write additional configuration files
 # Note: Using root:root initially, ownership fixed in runcmd after user creation
@@ -133,7 +137,7 @@ write_files:
       docker info
       echo ""
       echo "Running hello-world container..."
-      docker run --rm hello-world
+      docker run --rm hello-world:linux
       echo ""
       echo "=== Docker Swarm Status ==="
       docker node ls
@@ -146,7 +150,7 @@ write_files:
       version: '3.8'
       services:
         web:
-          image: nginx:latest
+          image: nginx:1.28.2-alpine3.23
           ports:
             - "8080:80"
           volumes:
@@ -154,7 +158,7 @@ write_files:
           restart: unless-stopped
         
         redis:
-          image: redis:alpine
+          image: redis:8.4.0-alpine
           restart: unless-stopped
 
   - path: /home/ubuntu/docker-compose-example/html/index.html
@@ -191,7 +195,7 @@ write_files:
       version: '3.8'
       services:
         web:
-          image: nginx:latest
+          image: nginx:1.28.2-alpine3.23
           deploy:
             replicas: 3
             update_config:

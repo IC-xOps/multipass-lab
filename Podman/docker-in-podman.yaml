@@ -4,12 +4,14 @@
 # Runs Docker Engine inside a privileged Podman container
 # Use case: Testing Docker workflows in isolated Podman-managed environments
 # Note: Uses root Podman for proper privileged container support
+# Pinned versions for stability (Ubuntu 24.04 LTS)
+# Podman: 4.9.3 | Docker DinD image: 27.3
 
 package_update: true
 package_upgrade: true
 
 packages:
-  - podman
+  - podman=4.9.3+ds1-1ubuntu0.2
   - curl
   - wget
   - git
@@ -35,7 +37,7 @@ write_files:
   - path: /home/ubuntu/Containerfile.dind
     permissions: '0644'
     content: |
-      FROM docker:dind
+      FROM docker:27.3-dind
       
       # Install additional tools
       RUN apk add --no-cache \
@@ -140,7 +142,7 @@ write_files:
       ~/docker --version
       echo ""
       echo "Running hello-world in Docker (inside Podman):"
-      ~/docker run --rm hello-world
+      ~/docker run --rm hello-world:linux
       echo ""
       echo "=== Docker-in-Podman Test Complete ==="
 
@@ -215,7 +217,7 @@ runcmd:
     sleep 15
     
     # Pre-pull hello-world image
-    podman exec docker-engine docker pull hello-world || true
+    podman exec docker-engine docker pull hello-world:linux || true
   
   # Enable auto-start of Docker container via systemd service (root)
   - |
@@ -250,12 +252,12 @@ final_message: |
   
   Docker commands (via wrapper):
     ~/docker --version
-    ~/docker run hello-world
+    ~/docker run hello-world:linux
     ~/docker ps
   
   Or add to PATH: export PATH=$HOME:$PATH
-  Then use: docker run hello-world
+  Then use: docker run hello-world:linux
   
   === How it works ===
-  Podman runs a privileged container with Docker Engine (docker:dind)
+  Podman runs a privileged container with Docker Engine (docker:27.3-dind)
   The ~/docker wrapper executes commands inside that container

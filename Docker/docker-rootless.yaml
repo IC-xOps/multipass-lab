@@ -2,6 +2,8 @@
 
 # Docker Rootless Installation
 # Runs Docker daemon without root privileges for enhanced security
+# Pinned versions for stability (Ubuntu 24.04 LTS)
+# Docker packages: 29.2.1 | Containerd: 2.2.1 | Buildx: 0.31.1 | Compose: 5.0.2
 
 package_update: true
 package_upgrade: true
@@ -38,7 +40,7 @@ write_files:
       docker info 2>/dev/null | grep -E "Root|Security|Context"
       echo ""
       echo "Running hello-world container..."
-      docker run --rm hello-world
+      docker run --rm hello-world:linux
       echo ""
       echo "=== Docker Rootless Test Complete ==="
 
@@ -48,7 +50,7 @@ write_files:
       version: '3.8'
       services:
         web:
-          image: nginx:latest
+          image: nginx:1.28.2-alpine3.23
           ports:
             - "8080:80"
           volumes:
@@ -86,7 +88,7 @@ runcmd:
   - chmod a+r /etc/apt/keyrings/docker.asc
   - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
   - apt-get update
-  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+  - apt-get install -y docker-ce=5:29.2.1-1~ubuntu.24.04~noble docker-ce-cli=5:29.2.1-1~ubuntu.24.04~noble containerd.io=2.2.1-1~ubuntu.24.04~noble docker-buildx-plugin=0.31.1-1~ubuntu.24.04~noble docker-compose-plugin=5.0.2-1~ubuntu.24.04~noble docker-ce-rootless-extras=5:29.2.1-1~ubuntu.24.04~noble
   - systemctl disable --now docker.service docker.socket
   - systemctl disable --now containerd.service
   - usermod --add-subuids 100000-165535 --add-subgids 100000-165535 ubuntu
@@ -109,7 +111,7 @@ runcmd:
   - echo 'export PATH=/home/ubuntu/bin:$PATH' >> /home/ubuntu/.bashrc
   - echo 'export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/docker.sock' >> /home/ubuntu/.bashrc
   - chown ubuntu:ubuntu /home/ubuntu/.bashrc
-  - sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 DOCKER_HOST=unix:///run/user/1000/docker.sock docker pull hello-world || true
+  - sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 DOCKER_HOST=unix:///run/user/1000/docker.sock docker pull hello-world:linux || true
 
 final_message: |
   Docker Rootless installation complete!

@@ -3,7 +3,9 @@
 # Docker-in-LXD Installation and Configuration
 # Run Docker containers inside LXD system containers
 # Requires special security settings for nested containerization
-# Pinned versions for stability (Ubuntu 24.04 LTS / Ubuntu 22.04 LTS container)
+# Pinned versions for stability (Ubuntu 24.04 LTS)
+# LXD snap: 6.1/stable | Container images: nginx 1.28.2
+# Note: Docker packages inside LXD containers follow the container OS repo (Ubuntu 22.04)
 
 package_update: true
 package_upgrade: true
@@ -106,7 +108,7 @@ write_files:
       
       echo "Verifying Docker installation..."
       lxc exec "$CONTAINER_NAME" -- docker --version
-      lxc exec "$CONTAINER_NAME" -- docker run --rm hello-world
+      lxc exec "$CONTAINER_NAME" -- docker run --rm hello-world:linux
       
       echo ""
       echo "=== Docker setup complete in $CONTAINER_NAME ==="
@@ -146,7 +148,7 @@ runcmd:
   - lxc launch ubuntu:22.04 docker-host --profile default --profile docker
   - sleep 15
 
-  # Install Docker inside the container
+  # Install Docker inside the container (versions from Docker repo for container's Ubuntu 22.04)
   - lxc exec docker-host -- apt-get update
   - lxc exec docker-host -- apt-get install -y ca-certificates curl gnupg lsb-release
   - lxc exec docker-host -- bash -c 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
@@ -162,8 +164,8 @@ runcmd:
   - lxc exec docker-host -- systemctl start docker
 
   # Run nginx container and expose it
-  - lxc exec docker-host -- docker pull nginx:alpine
-  - lxc exec docker-host -- docker run -d --name web --restart unless-stopped -p 80:80 nginx:alpine
+  - lxc exec docker-host -- docker pull nginx:1.28.2-alpine3.23
+  - lxc exec docker-host -- docker run -d --name web --restart unless-stopped -p 80:80 nginx:1.28.2-alpine3.23
 
   # Add proxy device to expose container's port 80 on VM port 8080
   - lxc config device add docker-host http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80

@@ -3,6 +3,8 @@
 # LXD Installation and Configuration
 # System container and VM management with LXD
 # Pinned versions for stability (Ubuntu 24.04 LTS)
+# LXD snap: 6.1/stable channel
+# Note: Packages inside LXD containers follow the container OS repo versions (Ubuntu 22.04)
 
 package_update: true
 package_upgrade: true
@@ -157,6 +159,7 @@ runcmd:
   - lxc launch ubuntu:22.04 web-test
   - sleep 10
   - lxc exec web-test -- apt-get update
+  # Install nginx inside container (version from container's Ubuntu 22.04 repo)
   - lxc exec web-test -- apt-get install -y nginx
   - lxc exec web-test -- systemctl enable nginx
   - lxc exec web-test -- systemctl start nginx

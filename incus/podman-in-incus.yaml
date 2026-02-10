@@ -4,7 +4,8 @@
 # Run Podman containers inside Incus system containers
 # Podman is daemonless and rootless by default
 # Installed via Zabbly repository for Ubuntu 24.04 LTS
-# Pinned to Incus 6.x LTS for stability
+# Pinned to Incus LTS 6.0 channel | Container images: nginx 1.28.2 | podman-compose 1.5.0
+# Note: Podman packages inside Incus containers follow the container OS repo (Ubuntu 22.04)
 
 package_update: true
 package_upgrade: true
@@ -90,7 +91,7 @@ write_files:
       echo "Installing Podman..."
       incus exec "$CONTAINER_NAME" -- apt-get update
       incus exec "$CONTAINER_NAME" -- apt-get install -y podman slirp4netns fuse-overlayfs uidmap python3-pip
-      incus exec "$CONTAINER_NAME" -- pip3 install podman-compose
+      incus exec "$CONTAINER_NAME" -- pip3 install podman-compose==1.5.0
       
       echo "Configuring rootless Podman for ubuntu user..."
       incus exec "$CONTAINER_NAME" -- bash -c 'echo "ubuntu:100000:65536" >> /etc/subuid'
@@ -104,10 +105,10 @@ write_files:
       echo "=== Podman setup complete in $CONTAINER_NAME ==="
       echo ""
       echo "Run containers as root:"
-      echo "  incus exec $CONTAINER_NAME -- podman run --rm docker.io/alpine echo hello"
+      echo "  incus exec $CONTAINER_NAME -- podman run --rm docker.io/alpine:3.21 echo hello"
       echo ""
       echo "Run containers as ubuntu (rootless):"
-      echo "  incus exec $CONTAINER_NAME -- sudo -u ubuntu podman run --rm docker.io/alpine echo hello"
+      echo "  incus exec $CONTAINER_NAME -- sudo -u ubuntu podman run --rm docker.io/alpine:3.21 echo hello"
 
 runcmd:
   # Add Zabbly Incus repository
@@ -162,7 +163,7 @@ runcmd:
   - incus exec podman-host -- apt-get install -y podman slirp4netns fuse-overlayfs uidmap python3-pip
 
   # Install podman-compose via pip
-  - incus exec podman-host -- pip3 install podman-compose
+  - incus exec podman-host -- pip3 install podman-compose==1.5.0
 
   # Configure subuid/subgid for rootless podman
   - incus exec podman-host -- bash -c 'grep -q "^ubuntu:" /etc/subuid || echo "ubuntu:100000:65536" >> /etc/subuid'
@@ -174,8 +175,8 @@ runcmd:
   - incus exec podman-host -- chown -R ubuntu:ubuntu /home/ubuntu/.local
 
   # Pull nginx image and run container
-  - incus exec podman-host -- podman pull docker.io/nginx:alpine
-  - incus exec podman-host -- podman run -d --name web --restart always -p 80:80 docker.io/nginx:alpine
+  - incus exec podman-host -- podman pull docker.io/nginx:1.28.2-alpine3.23
+  - incus exec podman-host -- podman run -d --name web --restart always -p 80:80 docker.io/nginx:1.28.2-alpine3.23
 
   # Add proxy device to expose container's port 80 on VM port 8080
   - incus config device add podman-host http proxy listen=tcp:0.0.0.0:8080 connect=tcp:127.0.0.1:80
@@ -199,10 +200,10 @@ final_message: |
   incus exec podman-host -- podman images
   
   === Run More Containers ===
-  incus exec podman-host -- podman run -d --name myapp -p 8081:80 docker.io/nginx
+  incus exec podman-host -- podman run -d --name myapp -p 8081:80 docker.io/nginx:1.28.2-alpine3.23
   
   === Rootless Podman (as ubuntu user) ===
-  incus exec podman-host -- sudo -u ubuntu podman run --rm docker.io/alpine echo hello
+  incus exec podman-host -- sudo -u ubuntu podman run --rm docker.io/alpine:3.21 echo hello
   
   === Create Another Podman Host ===
   incus launch images:ubuntu/22.04 my-podman --profile default --profile podman

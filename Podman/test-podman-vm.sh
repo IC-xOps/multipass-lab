@@ -346,21 +346,21 @@ test_podman_functionality() {
     print_header "Testing Podman Functionality"
     
     print_test "Pull hello-world image"
-    if vm_exec podman pull hello-world; then
+    if vm_exec podman pull hello-world:linux; then
         print_pass "Successfully pulled hello-world image"
     else
         print_fail "Failed to pull hello-world image"
     fi
     
     print_test "Run hello-world container"
-    if vm_exec podman run --rm hello-world; then
+    if vm_exec podman run --rm hello-world:linux; then
         print_pass "Successfully ran hello-world container"
     else
         print_fail "Failed to run hello-world container"
     fi
     
     print_test "Create and write to volume"
-    if vm_exec bash -c "podman run --rm -v test-vol:/data alpine sh -c 'echo test > /data/test.txt && cat /data/test.txt'"; then
+    if vm_exec bash -c "podman run --rm -v test-vol:/data alpine:3.21 sh -c 'echo test > /data/test.txt && cat /data/test.txt'"; then
         print_pass "Volume read/write works correctly"
         # Cleanup
         vm_exec podman volume rm test-vol 2>/dev/null || true
@@ -371,7 +371,7 @@ test_podman_functionality() {
     print_test "Bind mount from home directory"
     vm_exec mkdir -p /home/ubuntu/test-mount
     vm_exec bash -c "echo 'test content' > /home/ubuntu/test-mount/test.txt"
-    if vm_exec podman run --rm -v /home/ubuntu/test-mount:/data:ro alpine cat /data/test.txt; then
+    if vm_exec podman run --rm -v /home/ubuntu/test-mount:/data:ro alpine:3.21 cat /data/test.txt; then
         print_pass "Bind mount from home directory works"
     else
         print_fail "Bind mount failed (possible permission issue)"
@@ -379,7 +379,7 @@ test_podman_functionality() {
     vm_exec rm -rf /home/ubuntu/test-mount 2>/dev/null || true
     
     print_test "Port mapping works"
-    vm_exec podman run -d --name test-nginx -p 8888:80 nginx:alpine 2>/dev/null
+    vm_exec podman run -d --name test-nginx -p 8888:80 nginx:1.28.2-alpine3.23 2>/dev/null
     sleep 2
     if vm_exec curl -s --connect-timeout 5 http://localhost:8888 | grep -q "nginx\|Welcome"; then
         print_pass "Port mapping works correctly"
@@ -410,7 +410,7 @@ test_docker_compatibility() {
     fi
     
     print_test "Docker run works"
-    if vm_exec docker run --rm hello-world; then
+    if vm_exec docker run --rm hello-world:linux; then
         print_pass "Docker run command works via Podman"
     else
         print_fail "Docker run command failed"

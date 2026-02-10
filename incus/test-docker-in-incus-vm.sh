@@ -364,7 +364,7 @@ test_docker_operations() {
     
     # Test docker run
     print_test "Docker run works"
-    if multipass exec "$VM_NAME" -- incus exec docker-host -- docker run --rm alpine echo "hello" > "$TMPFILE" 2>&1; then
+    if multipass exec "$VM_NAME" -- incus exec docker-host -- docker run --rm alpine:3.21 echo "hello" > "$TMPFILE" 2>&1; then
         if grep -q "hello" "$TMPFILE"; then
             pass
         else
@@ -376,7 +376,7 @@ test_docker_operations() {
     
     # Test docker pull (check if alpine exists)
     print_test "Docker pull works"
-    if vm_run "incus exec docker-host -- docker images alpine --format '{{.Repository}}'"; then
+    if vm_run "incus exec docker-host -- docker images alpine:3.21 --format '{{.Repository}}'"; then
         if grep -q "alpine" "$TMPFILE"; then
             pass
         else
@@ -388,7 +388,7 @@ test_docker_operations() {
     
     # Test docker networking
     print_test "Docker container networking"
-    if multipass exec "$VM_NAME" -- incus exec docker-host -- docker run --rm alpine ping -c 1 -W 3 8.8.8.8 > "$TMPFILE" 2>&1; then
+    if multipass exec "$VM_NAME" -- incus exec docker-host -- docker run --rm alpine:3.21 ping -c 1 -W 3 8.8.8.8 > "$TMPFILE" 2>&1; then
         if grep -q "bytes from" "$TMPFILE"; then
             pass
         else
